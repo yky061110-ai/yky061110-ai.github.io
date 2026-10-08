@@ -527,8 +527,8 @@ function currentState(){ return view==='local' ? localState : net.state; }
 function renderTable(){
   const s = currentState();
   const head = view==='local'
-    ? `<div class="bar"><h1>홀덤 테이블<small>컴퓨터 · ${LEVELS[s && s.level || 'normal'].name}</small></h1><button class="ghost" data-a="rules">족보</button><button class="ghost" data-a="leave">나가기</button></div>`
-    : `<div class="bar"><h1>홀덤 테이블<small>${net.role==='host'?'온라인 · 방장':'온라인'}</small></h1><button class="ghost" data-a="invite">초대 링크</button><button class="ghost" data-a="rules">족보</button><button class="ghost" data-a="leave">나가기</button></div>`;
+    ? `<div class="bar"><h1>홀덤 테이블<small>컴퓨터 · ${LEVELS[s && s.level || 'normal'].name}</small></h1>${soundBtn()}<button class="ghost" data-a="rules">족보</button><button class="ghost" data-a="leave">나가기</button></div>`
+    : `<div class="bar"><h1>홀덤 테이블<small>${net.role==='host'?'온라인 · 방장':'온라인'}</small></h1>${soundBtn()}<button class="ghost" data-a="invite">초대 링크</button><button class="ghost" data-a="rules">족보</button><button class="ghost" data-a="leave">나가기</button></div>`;
   const statusLine = view==='online' && net.status ? `<p class="note warn">${esc(net.status)}</p>` : '';
   if (!s){ app.innerHTML = `${head}${statusLine}<p class="status">${view==='online' && net.role==='guest' ? '방에 연결하는 중…' : '테이블을 준비하는 중…'}</p>${view==='online'&&net.status?`<button class="primary" data-a="leave">처음 화면으로</button>`:''}`; return; }
   const meId = myId();
@@ -1341,12 +1341,138 @@ async function shareInvite(){
 function leaveToLobby(){ closeNet(); clearTimeout(localTimer); view='lobby'; setRoomURL(null); render(); }
 
 /* ================= 이벤트 ================= */
+/* ================= 소리: 배경음악 + 효과음 =================
+   배경음악 audio/lounge.mp3 는 이 앱용으로 직접 작곡·합성한 곡 (tools/music-compose.js), 효과음은 아래 코드가 그 자리에서 합성
+   → 외부 음원을 쓰지 않아 저작권 걱정 없음 */
+const snd = { on: store('holdem.sound') === '1', ctx: null, master: null, music: null, sfx: null, buf: null, src: null, rendering: null, seen: null };
+const SOUND_ICON = on => `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 17.5V6.2l10-2.2v11.3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><ellipse cx="6.6" cy="17.6" rx="2.6" ry="2.1" fill="currentColor"/><ellipse cx="16.6" cy="15.4" rx="2.6" ry="2.1" fill="currentColor"/>${on ? '' : '<path d="M3.5 3.5l17 17" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'}</svg>`;
+function soundBtn(){ return `<button class="ghost snd-btn${snd.on ? ' on' : ''}" data-a="sound" aria-pressed="${snd.on}" aria-label="${snd.on ? '소리 끄기' : '소리 켜기'}" title="${snd.on ? '소리 끄기' : '소리 켜기'}">${SOUND_ICON(snd.on)}</button>`; }
+
+function audioReady(){
+  if (!snd.ctx){
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch(_){} // 아이폰 무음 스위치여도 들리게
+    snd.ctx = new AC();
+    snd.master = snd.ctx.createGain(); snd.master.gain.value = 1; snd.master.connect(snd.ctx.destination);
+    snd.music = snd.ctx.createGain(); snd.music.gain.value = 0; snd.music.connect(snd.master);
+    snd.sfx = snd.ctx.createGain(); snd.sfx.gain.value = .8; snd.sfx.connect(snd.master);
+  }
+  if (snd.ctx.state === 'suspended') snd.ctx.resume().catch(()=>{});
+  return snd.ctx;
+}
+function toggleSound(){
+  snd.on = !snd.on; store('holdem.sound', snd.on ? '1' : '0');
+  if (snd.on){ audioReady(); syncMusic(); sfx.tick(); }
+  else stopMusic();
+  render();
+}
+const inGame = () => view === 'local' || view === 'online';
+function syncMusic(){ if (snd.on && inGame()) startMusic(); else stopMusic(); }
+function stopMusic(){
+  if (!snd.ctx || !snd.src) return;
+  const t = snd.ctx.currentTime, src = snd.src; snd.src = null;
+  snd.music.gain.cancelScheduledValues(t); snd.music.gain.setValueAtTime(snd.music.gain.value, t); snd.music.gain.linearRampToValueAtTime(0, t + .4);
+  setTimeout(()=>{ try { src.stop(); } catch(_){} }, 450);
+}
+const MUSIC_URL = 'audio/lounge.mp3', MUSIC_LEN = 80; // 96bpm 32마디
+function loadMusic(ctx){
+  if (!snd.rendering) snd.rendering = fetch(MUSIC_URL).then(r=>{ if (!r.ok) throw 0; return r.arrayBuffer(); })
+    .then(ab=>new Promise((ok, no)=>{ const pr = ctx.decodeAudioData(ab, ok, no); if (pr && pr.then) pr.then(ok, no); }))
+    .then(b=>{ snd.buf = b; }).catch(()=>{ snd.rendering = null; });
+  return snd.rendering;
+}
+async function startMusic(){
+  const ctx = audioReady(); if (!ctx || snd.src) return;
+  if (!snd.buf){ await loadMusic(ctx); if (!snd.buf || !snd.on || !inGame() || snd.src) return; }
+  const src = ctx.createBufferSource(); src.buffer = snd.buf; src.loop = true;
+  if (snd.buf.duration > MUSIC_LEN){ src.loopStart = 0; src.loopEnd = MUSIC_LEN; }
+  src.connect(snd.music);
+  const t = ctx.currentTime;
+  snd.music.gain.cancelScheduledValues(t); snd.music.gain.setValueAtTime(0, t); snd.music.gain.linearRampToValueAtTime(.38, t + 1.5);
+  src.start(t); snd.src = src;
+}
+// 화면을 내리면 멈추고, 돌아오면 다시
+document.addEventListener('visibilitychange', ()=>{
+  if (!snd.ctx) return;
+  if (document.hidden) snd.ctx.suspend().catch(()=>{});
+  else if (snd.on) { snd.ctx.resume().catch(()=>{}); syncMusic(); }
+});
+// 소리를 켜 둔 채로 다시 들어오면, 첫 터치 때 소리 시작 (브라우저 정책상 터치 전엔 못 켬)
+['pointerdown','keydown'].forEach(ev=>document.addEventListener(ev, ()=>{ if (snd.on){ audioReady(); syncMusic(); } }, {capture: true, passive: true}));
+
+// ---------- 효과음 ----------
+const sfx = (()=>{
+  let nb = null;
+  const N = () => { const c = snd.ctx; if (!nb || nb.sampleRate !== c.sampleRate){ nb = c.createBuffer(1, c.sampleRate, c.sampleRate); const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; } return nb; };
+  const ok = () => snd.on && snd.ctx && snd.ctx.state === 'running';
+  const tone = (f, t, peak, dec, type = 'sine', dur) => { const c = snd.ctx, o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + .002); g.gain.setTargetAtTime(0, t + .002, dec); o.connect(g); g.connect(snd.sfx); o.start(t); o.stop(t + (dur || dec * 8)); return o; };
+  const hiss = (t, dur, type, f, q, peak, dec, f2) => { const c = snd.ctx, s = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain(); s.buffer = N(); fl.type = type; fl.frequency.setValueAtTime(f, t); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + dur); fl.Q.value = q; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + Math.min(.01, dur / 3)); g.gain.setTargetAtTime(0, t + Math.min(.01, dur / 3), dec); s.connect(fl); fl.connect(g); g.connect(snd.sfx); s.start(t, Math.random() * .5, dur + dec * 6); };
+  // 칩 하나가 부딪히는 소리 (점토 칩: 짧고 맑은 '딱')
+  const clink = (t, v) => { const f = 2600 + Math.random() * 1600; tone(f, t, .11 * v, .012); tone(f * 1.47, t, .06 * v, .009); hiss(t, .03, 'highpass', 3500, .7, .12 * v, .006); tone(700 + Math.random() * 300, t, .05 * v, .015); };
+  const chips = (n, spread = .05, v = 1) => { const t0 = snd.ctx.currentTime + .01; for (let k = 0; k < n; k++) clink(t0 + k * spread * (.6 + Math.random() * .8), v * (.7 + Math.random() * .4)); };
+  return {
+    // 체크: 테이블을 손가락으로 '똑똑'
+    check(){ if (!ok()) return; const t = snd.ctx.currentTime + .01; [0, .14].forEach((d, k) => { const o = tone(170, t + d, .5 - k * .1, .045, 'sine', .3); o.frequency.setValueAtTime(190, t + d); o.frequency.exponentialRampToValueAtTime(110, t + d + .08); hiss(t + d, .03, 'lowpass', 1400, .8, .25, .012); }); },
+    // 콜: 칩 몇 개
+    call(){ if (ok()) chips(4, .06); },
+    // 베팅·레이즈: 칩 여러 개를 내려놓음
+    bet(){ if (ok()) chips(7, .055); },
+    // 올인: 칩 더미를 한꺼번에 밀어 넣음
+    allin(){ if (!ok()) return; chips(16, .035, 1.1); hiss(snd.ctx.currentTime, .35, 'bandpass', 1800, .6, .12, .12, 900); },
+    // 폴드: 카드를 테이블에 미끄러뜨림
+    fold(){ if (!ok()) return; hiss(snd.ctx.currentTime + .01, .22, 'bandpass', 1500, .9, .22, .07, 4200); },
+    // 카드 한 장 넘기기
+    card(delay = 0){ if (!ok()) return; const t = snd.ctx.currentTime + .01 + delay; hiss(t, .05, 'highpass', 2800, .7, .3, .018); tone(1900, t, .04, .01); },
+    // 새 판: 셔플 + 카드 나눠주기
+    deal(){ if (!ok()) return; const t = snd.ctx.currentTime; for (let k = 0; k < 7; k++) hiss(t + k * .03, .03, 'bandpass', 3000 + Math.random() * 1500, .8, .1, .012); for (let k = 0; k < 4; k++) this.card(.3 + k * .11); },
+    // 차례가 넘어감: 작은 우드블록 '톡'
+    tick(){ if (!ok()) return; const t = snd.ctx.currentTime + .01; tone(1250, t, .12, .025); tone(2500, t, .03, .01); },
+    // 내 차례: 비브라폰 두 음 '띵-동'
+    myTurn(){ if (!ok()) return; const t = snd.ctx.currentTime + .01; [[880, 0], [1174.7, .16]].forEach(([f, d]) => { tone(f, t + d, .18, .35); tone(f * 4, t + d, .04, .05); }); },
+    // 시간이 얼마 안 남음
+    hurry(){ if (!ok()) return; const t = snd.ctx.currentTime + .01; tone(660, t, .08, .03); },
+    // 승리: 칩 쓸어 담기 (+ 내가 이기면 짧은 팡파르)
+    win(me){ if (!ok()) return; chips(12, .045, .9); hiss(snd.ctx.currentTime + .05, .5, 'bandpass', 1200, .5, .1, .15, 2600); if (me){ const t = snd.ctx.currentTime + .25; [587.3, 698.5, 880, 1174.7].forEach((f, k) => { tone(f, t + k * .09, .14, .4); tone(f * 2, t + k * .09, .03, .1); }); } },
+  };
+})();
+
+// 상태가 바뀔 때 어떤 소리를 낼지 판단 (컴퓨터 대결·온라인 공통)
+function soundCues(s){
+  if (!s || !inGame()){ snd.seen = null; return; }
+  const meId = myId(), mi = s.seats.findIndex(p => p && p.id === meId);
+  const lastK = s.log.length ? (s.log[s.log.length - 1].k || 0) : 0;
+  const cur = { room: view + (net.room || ''), k: lastK, hand: s.handNo, board: s.board.length, toAct: BETTING.has(s.stage) ? s.toAct : -1, stage: s.stage };
+  const prev = snd.seen; snd.seen = cur;
+  if (!prev || prev.room !== cur.room || !snd.on) return; // 처음 본 상태는 소리 없이 기록만
+  let played = false;
+  const fresh = s.log.filter(e => (e.k || 0) > prev.k).slice(-3);
+  fresh.forEach((e, n) => {
+    const m = e.m || '', delay = n * 120;
+    const play = fn => { played = true; setTimeout(fn, delay); };
+    if (/번째 핸드/.test(m)) play(() => sfx.deal());
+    else if (/획득/.test(m)) play(() => sfx.win(e.i === mi));
+    else if (/올인/.test(m)) play(() => sfx.allin());
+    else if (/^폴드/.test(m)) play(() => sfx.fold());
+    else if (/^체크/.test(m)) play(() => sfx.check());
+    else if (/^콜/.test(m)) play(() => sfx.call());
+    else if (/^(베팅|레이즈)/.test(m)) play(() => sfx.bet());
+  });
+  if (cur.hand === prev.hand && cur.board > prev.board){ for (let k = 0; k < cur.board - prev.board; k++) setTimeout(() => sfx.card(), 260 + k * 130); played = true; }
+  if (cur.toAct !== prev.toAct && cur.toAct >= 0){
+    const d = played ? 420 : 0;
+    if (cur.toAct === mi) setTimeout(() => sfx.myTurn(), d);
+    else if (!played) sfx.tick();
+  }
+}
+
 function render(){
   document.body.classList.toggle('wide-table', (view==='local' || view==='online') && isWide());
   if (view==='lobby') renderLobby(); else if (view==='join') renderJoin(); else renderTable();
   mountFaces(app);
   if (view==='lobby' || view==='join') placeQuickChat();
   const box = document.getElementById('chatbox'); if (box && box.hidden === (view==='online' && !!net.state)) renderChat(true);
+  soundCues(inGame() ? currentState() : null);
+  if (snd.ctx) syncMusic();
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
     clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 9000);
   }
@@ -1360,6 +1486,7 @@ document.addEventListener('click', async e=>{
   if (a==='close-sheet'){ if (e.target===el || el.tagName==='BUTTON') document.getElementById('sheet').innerHTML=''; return; }
   switch (a){
     case 'rules': openRules(); break;
+    case 'sound': toggleSound(); break;
     case 'bots-': botCount = Math.max(1, botCount-1); render(); break;
     case 'bots+': botCount = Math.min(5, botCount+1); render(); break;
     case 'start-local': clearTimeout(render.auto); startLocal(); break;
