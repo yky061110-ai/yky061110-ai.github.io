@@ -298,7 +298,7 @@ button .emo-i,.bubble .emo-i{vertical-align:middle}
 /* 내 족보 순위 사다리와 확률 */
 .hrank{display:flex;flex-direction:column;gap:4px;margin-top:2px}
 .ladder{display:grid;grid-template-columns:repeat(10,1fr);gap:2px;max-width:260px}
-.ladder i{font-style:normal;font-size:9px;line-height:1;text-align:center;padding:4px 0;border-radius:4px;background:rgba(255,255,255,.06);color:var(--faint);white-space:nowrap;overflow:hidden}
+.ladder i{font-style:normal;font-size:11px;font-family:var(--f-num);line-height:1;text-align:center;padding:4px 0;border-radius:4px;background:rgba(255,255,255,.06);color:var(--faint);white-space:nowrap;overflow:hidden}
 .ladder i.up{background:rgba(255,255,255,.04)}
 .ladder i.on{background:var(--brass);color:var(--brass-ink);font-weight:700}
 .hr-txt{font-size:12px;color:var(--muted)}
@@ -833,13 +833,13 @@ const LADDER_SHORT = ['로플','스플','포카','풀하','플러','스트','트
 function handRankHTML(term){
   const it = HAND_INFO[term]; if (!it) return '';
   if (!it.rank) return `<span class="hrank"><span class="hr-txt">시작 패 · 나올 확률 <b>${it.p}</b></span></span>`;
-  const cells = LADDER.map((n,i)=>`<i class="${i+1===it.rank?'on':''}${i+1<it.rank?' up':''}" title="${i+1}. ${n}">${LADDER_SHORT[i]}</i>`).join('');
-  return `<span class="hrank"><span class="ladder" aria-label="족보 순위">${cells}</span><span class="hr-txt">10단계 중 <b>${it.rank}번째</b> · 나올 확률 <b>${it.p}</b></span></span>`;
+  const cells = LADDER.map((n,i)=>`<i class="${i+1===it.rank?'on':''}${i+1<it.rank?' up':''}" title="${i+1}위 ${n}">${i+1}</i>`).join('');
+  return `<span class="hrank"><span class="ladder" aria-label="족보 순위">${cells}</span><span class="hr-txt">순위 <b>${it.rank}</b> / 10 · 나올 확률 <b>${it.p}</b></span></span>`;
 }
 function infoPopHTML(term){
   const it = HAND_INFO[term]; if (!it) return '';
   return `<div class="info-pop" role="dialog" aria-label="${term} 설명">
-    <div class="info-head"><b>${term}</b>${it.rank ? `<span class="info-rank">족보 10단계 중 ${it.rank}번째로 강함</span>` : `<span class="info-rank">시작 패 용어</span>`}<button class="info-x" data-a="info-close" aria-label="닫기">×</button></div>
+    <div class="info-head"><b>${term}</b>${it.rank ? `<span class="info-rank">순위 ${it.rank} / 10</span>` : `<span class="info-rank">시작 패 용어</span>`}<button class="info-x" data-a="info-close" aria-label="닫기">×</button></div>
     <p>${it.d}</p>
     <p class="info-prob">${it.rank ? '7장(내 카드 2 + 공용 5)으로 이 족보가 나올 확률' : '처음 받은 2장이 이렇게 나올 확률'} <b>${it.p}</b> · ${it.once}</p>
     <div class="info-ex">${it.ex.map(c=>cardHTML(c,{mini:true})).join('')}</div>
@@ -1484,7 +1484,7 @@ function openRules(){
   ];
   document.getElementById('sheet').innerHTML = `<div class="sheet" data-a="close-sheet"><div class="inner" role="dialog" aria-label="족보와 규칙">
     <div class="row" style="justify-content:space-between"><h3>족보 · 규칙</h3><button class="ghost" data-a="close-sheet">닫기</button></div>
-    <h4>핸드 순위 (위가 강함)</h4>
+    <h4>핸드 순위</h4>
     <p class="note" style="margin:0 0 6px">확률: 7장(내 카드 2장 + 공용 카드 5장)으로 만든 최종 족보 기준</p>
     <div class="scroll"><table class="rank">${ex.map((e,k)=>`<tr><td>${k+1}</td><td><span class="nm">${e[0]}</span><br><span class="note">${e[1]}</span><br><span class="prob"><b>${HAND_INFO[e[0]].p}</b> · ${HAND_INFO[e[0]].once}</span></td><td><div class="ex">${e[2].map(c=>cardHTML(c,{mini:true})).join('')}</div></td></tr>`).join('')}</table></div>
     <h4>진행 순서</h4>
