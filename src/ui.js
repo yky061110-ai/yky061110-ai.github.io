@@ -364,7 +364,7 @@ function openRules(){
 }
 
 /* ================= 컴퓨터 대결 모드 ================= */
-const BOT_NAMES = ['민준','서연','도윤','하은','지호'];
+const BOT_NAMES = ['player1','player2','player3','player4','player5'];
 const BOT_SEATS = {1:[3],2:[2,4],3:[2,3,4],4:[1,2,4,5],5:[1,2,3,4,5]};
 function startLocal(){
   let s = emptyTable(6, chipChoice);
