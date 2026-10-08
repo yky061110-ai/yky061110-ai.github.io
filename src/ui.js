@@ -168,7 +168,7 @@ function chipTray(amount, startTotal, id){
   const parts = id ? trayParts(id, amount, startTotal) : chipBreakdown(amount, startTotal);
   if (!parts.length) return '<span class="note">칩 없음</span>';
   return parts.map(([ch, n])=>{
-    const k = Math.min(n, 12);
+    const k = Math.min(n, 10);
     return `<span class="tcol" title="${fmt(ch.v)} × ${n}"><span class="stack"><span class="col" style="--n:${k}">${Array.from({length:k},(_,i)=>chipOne(ch, i)).join('')}</span></span><span class="count num">×${n}</span></span>`;
   }).join('');
 }
@@ -270,19 +270,25 @@ function saveRename(){
 
 /* ---------- 테이블 ---------- */
 // 자리 위치(테이블 너비·높이 %): 내 자리(0)를 맨 아래 가운데에 두고 시계 방향.
-// 세로 화면: 가로로 긴 타원 위·아래에 줄지어 앉고, 인원이 많으면 양옆에도 앉음
+// 세로 화면: 맨 아래 줄은 나만(양옆에 이모티콘·내 칩), 다른 사람은 위쪽 줄과 양옆에 앉음
 const SEAT_LAYOUT = {
   2: [[50,90],[50,11]],
   3: [[50,90],[25,11],[75,11]],
   4: [[50,90],[11,50],[50,11],[89,50]],
-  5: [[50,90],[19,89],[25,11],[75,11],[81,89]],
-  6: [[50,90],[18,89],[18,11],[50,11],[82,11],[82,89]],
-  7: [[50,90],[22,89],[10,50],[30,11],[70,11],[90,50],[78,89]],
-  8: [[50,90],[22,89],[10,50],[18,11],[50,11],[82,11],[90,50],[78,89]],
-  9: [[50,90],[22,89],[10,50],[14,11],[38,11],[62,11],[86,11],[90,50],[78,89]],
+  5: [[50,90],[11,50],[30,11],[70,11],[89,50]],
+  6: [[50,90],[11,50],[18,11],[50,11],[82,11],[89,50]],
+  7: [[50,90],[10,62],[10,38],[30,11],[70,11],[90,38],[90,62]],
+  8: [[50,90],[10,62],[10,38],[18,11],[50,11],[82,11],[90,38],[90,62]],
+  9: [[50,90],[10,62],[10,38],[14,11],[38,11],[62,11],[86,11],[90,38],[90,62]],
 };
 // 가로 화면(PC·태블릿): 2:1 타원 테두리를 따라 고르게
-function wideSlot(k, N){ const a = Math.PI/2 + k*2*Math.PI/N; return [50 + 44*Math.cos(a), 50 + 40*Math.sin(a)]; }
+function wideSlot(k, N){
+  if (k===0) return [50, 90];
+  if (N===2) return [50, 10];
+  // 내 자리 양옆(이모티콘·칩 자리)은 비워 두고 나머지 둘레에 고르게
+  const gap = Math.max(60, 180 - (N-1)*30), a = (90 + gap + (k-1)*(360 - 2*gap)/(N-2)) * Math.PI/180;
+  return [50 + 44*Math.cos(a), 50 + 40*Math.sin(a)];
+}
 const isWide = () => innerWidth >= 1000 && innerWidth > innerHeight;
 // 베팅 칩 위치: 자리에서 가운데 쪽으로, 공용 카드·팟과 자기 자리를 피해서 (단위: 테이블 %)
 function betPos(x, y, dense){
@@ -300,19 +306,28 @@ function placeBets(){
   const bets = [...table.querySelectorAll('.betchip')]; if (!bets.length) return;
   const T = table.getBoundingClientRect(), R = e => e.getBoundingClientRect();
   const hit = (a, c) => a.left < c.right-1 && c.left < a.right-1 && a.top < c.bottom-1 && c.top < a.bottom-1;
-  const blockers = [...table.querySelectorAll('.center .board, .center .pot, .center .stage, .seat')].map(R);
+  const blockers = [...table.querySelectorAll('.center .board, .center .pot, .center .stage, .seat, .emostrip, .mytray')].map(R);
   const placed = [];
-  bets.forEach(el=>{
-    const x = +el.dataset.x, y = +el.dataset.y, side = x < 50 ? 1 : -1, cands = [];
-    for (let f = .5; f >= .14; f -= .04) cands.push([x + (50-x)*f, y + (50-y)*f]);
-    cands.push([x + side*13, y], [x + side*9, y + (y<50 ? 15 : -15)], [x, y + (y<50 ? 19 : -19)], [x + side*9, y + (y<50 ? -15 : 15)], [x + side*17, y + (y<50 ? 8 : -8)]);
+  const place = (el, tight) => {
+    const x = +el.dataset.x, y = +el.dataset.y, side = x < 50 ? 1 : -1;
+    el.classList.toggle('tight', !!tight);
+    const b0 = R(el), w = b0.width, h = b0.height;               // 칩 더미 크기는 한 번만 재고
+    const rectAt = (bx, by) => { const cx = T.left + bx/100*T.width, cy = T.top + by/100*T.height; return {left:cx-w/2, right:cx+w/2, top:cy-h/2, bottom:cy+h/2}; };
+    const cands = [];
+    for (let f = .5; f >= .14; f -= .04) cands.push([x + (50-x)*f, y + (50-y)*f]);   // 가운데 쪽으로
+    for (let dx = 8; dx <= 26; dx += 3) for (const dy of [0, -6, 6, -11, 11, -16, 16, -21, 21]) cands.push([x + side*dx, y + dy]);  // 자리 주변
+    for (const dy of [14, -14, 18, -18, 22, -22]) cands.push([x, y + dy]);
     for (const [bx, by] of cands){
-      el.style.left = bx + '%'; el.style.top = by + '%';
-      const r = R(el);
-      if (r.left >= T.left && r.right <= T.right && !blockers.some(b=>hit(r, b)) && !placed.some(b=>hit(r, b))){ placed.push(r); return; }
+      const r = rectAt(bx, by);
+      if (r.left >= T.left && r.right <= T.right && r.top >= T.top && r.bottom <= T.bottom && !blockers.some(b=>hit(r, b)) && !placed.some(b=>hit(r, b))){
+        el.style.left = bx + '%'; el.style.top = by + '%'; placed.push(r); return true;
+      }
     }
-    el.style.left = cands[0][0] + '%'; el.style.top = cands[0][1] + '%'; placed.push(R(el));
-  });
+    if (!tight) return false;
+    el.style.left = cands[0][0] + '%'; el.style.top = cands[0][1] + '%'; placed.push(R(el)); return true;
+  };
+  // 자리가 부족하면 칩 더미 없이 금액만 작게 표시
+  bets.forEach(el=>{ if (!place(el, false)) place(el, true); });
 }
 function slotPos(k, N){ return isWide() ? wideSlot(k, N) : (SEAT_LAYOUT[N] || SEAT_LAYOUT[6])[k]; }
 function currentState(){ return view==='local' ? localState : net.state; }
@@ -384,7 +399,7 @@ function renderTable(){
       ${pot? `<span class="pot">${chipStack(pot,{cols:4,maxPer:7})}<span class="amt">팟 <b class="num">${fmt(pot)}</b></span></span>` : ''}
       <span class="result">${result}</span>
     </div>
-    ${chips}${seatsHTML}
+    ${chips}${seatsHTML}${myIdx>=0 ? mySideHTML(s, s.seats[myIdx]) : ''}
   </div>
   ${renderDock(s, myIdx, now)}
   <ul class="log">${s.log.slice(-8).reverse().map(e=>`<li class="${e.i<0?'sys':''}">${e.i>=0?`<b data-lid="${esc(e.id)}" data-li="${e.i}" data-ln="${esc(e.n||'')}"></b> `:''}${esc(e.m)}</li>`).join('')}</ul>`;
@@ -392,7 +407,6 @@ function renderTable(){
   app.querySelectorAll('[data-nm]').forEach(el=>{ el.textContent = nameOf(s, +el.dataset.nm); });
   app.querySelectorAll('[data-li]').forEach(el=>{ el.textContent = logName(s, {i:+el.dataset.li, id:el.dataset.lid, n:el.dataset.ln}); });
   placeBets();
-  app.querySelectorAll('[data-myname]').forEach(el=>{ el.textContent = ui.myNameText || '나'; });
   app.querySelectorAll('[data-bub]').forEach(el=>{ const b = ui.bubbles[el.dataset.bub]; if (b) el.textContent = b.text; });
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
@@ -401,6 +415,13 @@ function renderTable(){
   if (ui.renameOpen && ui.renameFocus){ const r = document.getElementById('rename-in'); if (r){ r.focus(); const n = r.value.length; try { r.setSelectionRange(n, n); } catch(_){} } }
 }
 
+// 내 자리 왼쪽: 이모티콘 5개 + 더보기(+) / 오른쪽: 내 칩 종류별 더미
+function mySideHTML(s, p){
+  const quick = EMOJIS.slice(0, 5).map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('');
+  const all = ui.emoOpen ? `<div class="emo-all" role="listbox" aria-label="이모티콘 전체">${EMOJIS.map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('')}</div>` : '';
+  return `<div class="emostrip">${quick}<button class="more${ui.emoOpen?' on':''}" data-a="emo-toggle" aria-label="이모티콘 전체 보기" aria-expanded="${!!ui.emoOpen}">${ui.emoOpen?'×':'+'}</button></div>${all}
+    <div class="mytray" aria-label="내 칩">${chipTray(p.chips, s.startChips||START_CHIPS, p.id)}</div>`;
+}
 function raiseLabel(s, i, to){ const p=s.seats[i]; if (to >= p.bet+p.chips) return `올인 ${fmt(to)}`; return `${s.currentBet===0?'베팅':'레이즈'} ${fmt(to)}`; }
 
 function inviteBox(s){
@@ -489,14 +510,7 @@ function renderDock(s, mi, now){
         <button class="primary" type="submit">저장</button></form>`;
     }
   }
-  const myName = view==='local' ? (store('holdem.name') || '나') : (p.name || me.name);
-  const head = `<div class="mehead">
-      <button class="emo-btn${ui.emoOpen?' on':''}" data-a="emo-toggle" aria-label="이모티콘 보내기" aria-expanded="${!!ui.emoOpen}">😀</button>
-      <b class="myname" data-myname></b>
-      <div class="tray" aria-label="보유 칩">${chipTray(p.chips, s.startChips||START_CHIPS, p.id)}</div>
-    </div>${ui.emoOpen ? `<div class="emo-quick" role="listbox" aria-label="이모티콘">${EMOJIS.map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e}">${e}</button>`).join('')}</div>` : ''}`;
-  ui.myNameText = myName;
-  return `<div class="dock">${head}${mine}${controls}${extra}${inviteBox(s)}</div>`;
+  return `<div class="dock">${mine}${controls}${extra}${inviteBox(s)}</div>`;
 }
 
 function localGameOver(s){
@@ -1002,6 +1016,7 @@ function render(){
   }
 }
 document.addEventListener('click', async e=>{
+  if (ui.emoOpen && !e.target.closest('.emo-all, [data-a=emo-toggle]')){ ui.emoOpen = false; if (!e.target.closest('[data-a]')) { render(); return; } }
   const el = e.target.closest('[data-a]'); if (!el) return;
   const a = el.dataset.a;
   if (a==='close-sheet'){ if (e.target===el || el.tagName==='BUTTON') document.getElementById('sheet').innerHTML=''; return; }

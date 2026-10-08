@@ -84,9 +84,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-
 .result{font-size:12px;line-height:1.35;text-align:center;color:var(--brass);min-height:1.4em;text-wrap:balance}
 .stage{font-size:11px;letter-spacing:.14em;color:var(--muted)}
 
-.seat{position:absolute;transform:translate(-50%,-50%);width:70px;display:flex;flex-direction:column;align-items:center;gap:3px}
+.seat{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px}
 .seat .hole{display:flex;gap:2px;--cw:25px;height:35px}
-.table.wide .seat{width:clamp(100px,8.4vw,140px)}
 .table.wide .seat .hole{--cw:clamp(36px,3vw,50px);height:calc(var(--cw)*1.4)}
 .table.wide .plate{padding:6px 8px;border-radius:12px}
 .table.wide .plate .nm,.table.wide .plate .ch{font-size:clamp(13px,1vw,16px)}
@@ -109,6 +108,8 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-
 .betchip{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;--sz:15px;pointer-events:none}
 .betchip .amt{font-size:10px;background:rgba(0,0,0,.45);color:var(--ink);border-radius:999px;padding:0 6px;white-space:nowrap}
 .table.wide .betchip{--sz:clamp(18px,1.5vw,24px)}
+.betchip.tight .stack{display:none}
+.betchip.tight .amt{border:1px solid var(--brass)}
 .table.wide .betchip .amt{font-size:12px}
 .sit{background:rgba(0,0,0,.25);border:1px dashed var(--brass);border-radius:10px;padding:8px 6px;width:100%;font-size:12px;color:var(--brass)}
 .emptyseat{border:1px dashed rgba(242,234,216,.12);border-radius:10px;padding:8px 6px;width:100%;font-size:11px;color:var(--faint);text-align:center}
@@ -194,9 +195,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-
 .stepper button:disabled{opacity:.35;cursor:not-allowed}
 .seatsize{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px}
 .seatsize>span:first-child{font-weight:700}
-.table.dense .seat{width:62px}
 .table.dense .seat .hole{--cw:21px;height:30px}
-.table.wide.dense .seat{width:clamp(88px,7.4vw,124px)}
 .table.wide.dense .seat .hole{--cw:clamp(32px,2.7vw,44px);height:calc(var(--cw)*1.4)}
 .table.dense .plate{padding:3px 4px}
 .table.dense .plate .nm,.table.dense .plate .ch{font-size:11px}
@@ -236,20 +235,29 @@ body.wide-table #app>.log{grid-area:log;max-height:200px}
 body.wide-table #chatbox{grid-area:chat;margin:0;max-width:none}
 body.wide-table .mine .hole{--cw:64px}
 
-/* 내 이름 줄: 이모티콘 버튼 · 이름 · 보유 칩 */
-.mehead{display:flex;align-items:center;gap:10px;min-width:0}
-.emo-btn{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--panel-2);font-size:22px;line-height:1;display:grid;place-items:center}
-.emo-btn.on{border-color:var(--brass);box-shadow:inset 0 0 0 1px var(--brass)}
-.myname{font-family:var(--f-display);font-weight:400;font-size:19px;min-width:0;flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tray{margin-left:auto;display:flex;gap:7px;align-items:flex-end;flex:none;--sz:20px}
-.tcol{display:flex;flex-direction:column;align-items:center;gap:3px}
-.tcol .count{font-size:10.5px;color:var(--muted);line-height:1}
-.emo-quick{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px}
-.emo-quick button{background:transparent;border:0;font-size:24px;line-height:1;padding:7px 0;border-radius:8px}
-.emo-quick button:hover,.emo-quick button:focus-visible{background:var(--panel-2)}
+/* 내 자리 양옆: 왼쪽 이모티콘 줄, 오른쪽 내 칩 */
+.table{--seatw:70px}
+.table.dense{--seatw:62px}
+.table.wide{--seatw:clamp(100px,8.4vw,140px)}
+.table.wide.dense{--seatw:clamp(88px,7.4vw,124px)}
+.table .seat{width:var(--seatw)}
+.emostrip{position:absolute;top:90%;right:calc(50% + var(--seatw)/2 + 6px);transform:translateY(-50%);display:flex;gap:2px;
+  max-width:calc(50% - var(--seatw)/2 - 8px);background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:999px;padding:3px;z-index:2}
+.emostrip button{flex:1 1 0;min-width:0;width:clamp(22px,7vw,36px);aspect-ratio:1;border:0;border-radius:50%;background:transparent;font-size:clamp(15px,4.6vw,22px);line-height:1;padding:0;display:grid;place-items:center}
+.emostrip button:active{background:var(--panel-2)}
+.emostrip .more{background:var(--panel-2);color:var(--ink);font:700 clamp(15px,4.4vw,20px)/1 var(--f-num)}
+.emostrip .more.on{background:var(--brass);color:var(--brass-ink)}
+.emo-all{position:absolute;left:2%;right:2%;bottom:17%;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;background:var(--bg);border:1px solid var(--brass);border-radius:14px;padding:6px;z-index:6;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.emo-all button{background:transparent;border:0;font-size:clamp(20px,6vw,26px);line-height:1;padding:6px 0;border-radius:8px}
+.emo-all button:hover,.emo-all button:focus-visible{background:var(--panel-2)}
+.table.wide .emo-all{left:auto;right:calc(50% + var(--seatw)/2 + 6px);width:min(440px,46%);bottom:16%}
+.mytray{position:absolute;top:90%;left:calc(50% + var(--seatw)/2 + 8px);transform:translateY(-50%);display:flex;gap:5px;align-items:flex-end;
+  max-width:calc(50% - var(--seatw)/2 - 10px);--sz:clamp(15px,4.6vw,22px);z-index:2}
+.table.wide .mytray{--sz:clamp(20px,1.7vw,26px);gap:8px}
+.tcol{display:flex;flex-direction:column;align-items:center;gap:3px;flex:none}
+.tcol .count{font-size:10.5px;color:var(--ink);line-height:1;background:rgba(0,0,0,.35);border-radius:999px;padding:1px 4px}
 .bubble.emo{font-size:24px;padding:2px 8px;background:var(--card);line-height:1.2}
 .table.wide .bubble.emo{font-size:32px}
-@media (max-width:380px){.tray{--sz:17px;gap:5px}.myname{font-size:17px}}
 @media (max-width:420px){
   .mine .hole{--cw:50px}
   .hero h2{font-size:38px}
@@ -769,7 +777,7 @@ function chipTray(amount, startTotal, id){
   const parts = id ? trayParts(id, amount, startTotal) : chipBreakdown(amount, startTotal);
   if (!parts.length) return '<span class="note">칩 없음</span>';
   return parts.map(([ch, n])=>{
-    const k = Math.min(n, 12);
+    const k = Math.min(n, 10);
     return `<span class="tcol" title="${fmt(ch.v)} × ${n}"><span class="stack"><span class="col" style="--n:${k}">${Array.from({length:k},(_,i)=>chipOne(ch, i)).join('')}</span></span><span class="count num">×${n}</span></span>`;
   }).join('');
 }
@@ -871,19 +879,25 @@ function saveRename(){
 
 /* ---------- 테이블 ---------- */
 // 자리 위치(테이블 너비·높이 %): 내 자리(0)를 맨 아래 가운데에 두고 시계 방향.
-// 세로 화면: 가로로 긴 타원 위·아래에 줄지어 앉고, 인원이 많으면 양옆에도 앉음
+// 세로 화면: 맨 아래 줄은 나만(양옆에 이모티콘·내 칩), 다른 사람은 위쪽 줄과 양옆에 앉음
 const SEAT_LAYOUT = {
   2: [[50,90],[50,11]],
   3: [[50,90],[25,11],[75,11]],
   4: [[50,90],[11,50],[50,11],[89,50]],
-  5: [[50,90],[19,89],[25,11],[75,11],[81,89]],
-  6: [[50,90],[18,89],[18,11],[50,11],[82,11],[82,89]],
-  7: [[50,90],[22,89],[10,50],[30,11],[70,11],[90,50],[78,89]],
-  8: [[50,90],[22,89],[10,50],[18,11],[50,11],[82,11],[90,50],[78,89]],
-  9: [[50,90],[22,89],[10,50],[14,11],[38,11],[62,11],[86,11],[90,50],[78,89]],
+  5: [[50,90],[11,50],[30,11],[70,11],[89,50]],
+  6: [[50,90],[11,50],[18,11],[50,11],[82,11],[89,50]],
+  7: [[50,90],[10,62],[10,38],[30,11],[70,11],[90,38],[90,62]],
+  8: [[50,90],[10,62],[10,38],[18,11],[50,11],[82,11],[90,38],[90,62]],
+  9: [[50,90],[10,62],[10,38],[14,11],[38,11],[62,11],[86,11],[90,38],[90,62]],
 };
 // 가로 화면(PC·태블릿): 2:1 타원 테두리를 따라 고르게
-function wideSlot(k, N){ const a = Math.PI/2 + k*2*Math.PI/N; return [50 + 44*Math.cos(a), 50 + 40*Math.sin(a)]; }
+function wideSlot(k, N){
+  if (k===0) return [50, 90];
+  if (N===2) return [50, 10];
+  // 내 자리 양옆(이모티콘·칩 자리)은 비워 두고 나머지 둘레에 고르게
+  const gap = Math.max(60, 180 - (N-1)*30), a = (90 + gap + (k-1)*(360 - 2*gap)/(N-2)) * Math.PI/180;
+  return [50 + 44*Math.cos(a), 50 + 40*Math.sin(a)];
+}
 const isWide = () => innerWidth >= 1000 && innerWidth > innerHeight;
 // 베팅 칩 위치: 자리에서 가운데 쪽으로, 공용 카드·팟과 자기 자리를 피해서 (단위: 테이블 %)
 function betPos(x, y, dense){
@@ -901,19 +915,28 @@ function placeBets(){
   const bets = [...table.querySelectorAll('.betchip')]; if (!bets.length) return;
   const T = table.getBoundingClientRect(), R = e => e.getBoundingClientRect();
   const hit = (a, c) => a.left < c.right-1 && c.left < a.right-1 && a.top < c.bottom-1 && c.top < a.bottom-1;
-  const blockers = [...table.querySelectorAll('.center .board, .center .pot, .center .stage, .seat')].map(R);
+  const blockers = [...table.querySelectorAll('.center .board, .center .pot, .center .stage, .seat, .emostrip, .mytray')].map(R);
   const placed = [];
-  bets.forEach(el=>{
-    const x = +el.dataset.x, y = +el.dataset.y, side = x < 50 ? 1 : -1, cands = [];
-    for (let f = .5; f >= .14; f -= .04) cands.push([x + (50-x)*f, y + (50-y)*f]);
-    cands.push([x + side*13, y], [x + side*9, y + (y<50 ? 15 : -15)], [x, y + (y<50 ? 19 : -19)], [x + side*9, y + (y<50 ? -15 : 15)], [x + side*17, y + (y<50 ? 8 : -8)]);
+  const place = (el, tight) => {
+    const x = +el.dataset.x, y = +el.dataset.y, side = x < 50 ? 1 : -1;
+    el.classList.toggle('tight', !!tight);
+    const b0 = R(el), w = b0.width, h = b0.height;               // 칩 더미 크기는 한 번만 재고
+    const rectAt = (bx, by) => { const cx = T.left + bx/100*T.width, cy = T.top + by/100*T.height; return {left:cx-w/2, right:cx+w/2, top:cy-h/2, bottom:cy+h/2}; };
+    const cands = [];
+    for (let f = .5; f >= .14; f -= .04) cands.push([x + (50-x)*f, y + (50-y)*f]);   // 가운데 쪽으로
+    for (let dx = 8; dx <= 26; dx += 3) for (const dy of [0, -6, 6, -11, 11, -16, 16, -21, 21]) cands.push([x + side*dx, y + dy]);  // 자리 주변
+    for (const dy of [14, -14, 18, -18, 22, -22]) cands.push([x, y + dy]);
     for (const [bx, by] of cands){
-      el.style.left = bx + '%'; el.style.top = by + '%';
-      const r = R(el);
-      if (r.left >= T.left && r.right <= T.right && !blockers.some(b=>hit(r, b)) && !placed.some(b=>hit(r, b))){ placed.push(r); return; }
+      const r = rectAt(bx, by);
+      if (r.left >= T.left && r.right <= T.right && r.top >= T.top && r.bottom <= T.bottom && !blockers.some(b=>hit(r, b)) && !placed.some(b=>hit(r, b))){
+        el.style.left = bx + '%'; el.style.top = by + '%'; placed.push(r); return true;
+      }
     }
-    el.style.left = cands[0][0] + '%'; el.style.top = cands[0][1] + '%'; placed.push(R(el));
-  });
+    if (!tight) return false;
+    el.style.left = cands[0][0] + '%'; el.style.top = cands[0][1] + '%'; placed.push(R(el)); return true;
+  };
+  // 자리가 부족하면 칩 더미 없이 금액만 작게 표시
+  bets.forEach(el=>{ if (!place(el, false)) place(el, true); });
 }
 function slotPos(k, N){ return isWide() ? wideSlot(k, N) : (SEAT_LAYOUT[N] || SEAT_LAYOUT[6])[k]; }
 function currentState(){ return view==='local' ? localState : net.state; }
@@ -985,7 +1008,7 @@ function renderTable(){
       ${pot? `<span class="pot">${chipStack(pot,{cols:4,maxPer:7})}<span class="amt">팟 <b class="num">${fmt(pot)}</b></span></span>` : ''}
       <span class="result">${result}</span>
     </div>
-    ${chips}${seatsHTML}
+    ${chips}${seatsHTML}${myIdx>=0 ? mySideHTML(s, s.seats[myIdx]) : ''}
   </div>
   ${renderDock(s, myIdx, now)}
   <ul class="log">${s.log.slice(-8).reverse().map(e=>`<li class="${e.i<0?'sys':''}">${e.i>=0?`<b data-lid="${esc(e.id)}" data-li="${e.i}" data-ln="${esc(e.n||'')}"></b> `:''}${esc(e.m)}</li>`).join('')}</ul>`;
@@ -993,7 +1016,6 @@ function renderTable(){
   app.querySelectorAll('[data-nm]').forEach(el=>{ el.textContent = nameOf(s, +el.dataset.nm); });
   app.querySelectorAll('[data-li]').forEach(el=>{ el.textContent = logName(s, {i:+el.dataset.li, id:el.dataset.lid, n:el.dataset.ln}); });
   placeBets();
-  app.querySelectorAll('[data-myname]').forEach(el=>{ el.textContent = ui.myNameText || '나'; });
   app.querySelectorAll('[data-bub]').forEach(el=>{ const b = ui.bubbles[el.dataset.bub]; if (b) el.textContent = b.text; });
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
@@ -1002,6 +1024,13 @@ function renderTable(){
   if (ui.renameOpen && ui.renameFocus){ const r = document.getElementById('rename-in'); if (r){ r.focus(); const n = r.value.length; try { r.setSelectionRange(n, n); } catch(_){} } }
 }
 
+// 내 자리 왼쪽: 이모티콘 5개 + 더보기(+) / 오른쪽: 내 칩 종류별 더미
+function mySideHTML(s, p){
+  const quick = EMOJIS.slice(0, 5).map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('');
+  const all = ui.emoOpen ? `<div class="emo-all" role="listbox" aria-label="이모티콘 전체">${EMOJIS.map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('')}</div>` : '';
+  return `<div class="emostrip">${quick}<button class="more${ui.emoOpen?' on':''}" data-a="emo-toggle" aria-label="이모티콘 전체 보기" aria-expanded="${!!ui.emoOpen}">${ui.emoOpen?'×':'+'}</button></div>${all}
+    <div class="mytray" aria-label="내 칩">${chipTray(p.chips, s.startChips||START_CHIPS, p.id)}</div>`;
+}
 function raiseLabel(s, i, to){ const p=s.seats[i]; if (to >= p.bet+p.chips) return `올인 ${fmt(to)}`; return `${s.currentBet===0?'베팅':'레이즈'} ${fmt(to)}`; }
 
 function inviteBox(s){
@@ -1090,14 +1119,7 @@ function renderDock(s, mi, now){
         <button class="primary" type="submit">저장</button></form>`;
     }
   }
-  const myName = view==='local' ? (store('holdem.name') || '나') : (p.name || me.name);
-  const head = `<div class="mehead">
-      <button class="emo-btn${ui.emoOpen?' on':''}" data-a="emo-toggle" aria-label="이모티콘 보내기" aria-expanded="${!!ui.emoOpen}">😀</button>
-      <b class="myname" data-myname></b>
-      <div class="tray" aria-label="보유 칩">${chipTray(p.chips, s.startChips||START_CHIPS, p.id)}</div>
-    </div>${ui.emoOpen ? `<div class="emo-quick" role="listbox" aria-label="이모티콘">${EMOJIS.map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e}">${e}</button>`).join('')}</div>` : ''}`;
-  ui.myNameText = myName;
-  return `<div class="dock">${head}${mine}${controls}${extra}${inviteBox(s)}</div>`;
+  return `<div class="dock">${mine}${controls}${extra}${inviteBox(s)}</div>`;
 }
 
 function localGameOver(s){
@@ -1603,6 +1625,7 @@ function render(){
   }
 }
 document.addEventListener('click', async e=>{
+  if (ui.emoOpen && !e.target.closest('.emo-all, [data-a=emo-toggle]')){ ui.emoOpen = false; if (!e.target.closest('[data-a]')) { render(); return; } }
   const el = e.target.closest('[data-a]'); if (!el) return;
   const a = el.dataset.a;
   if (a==='close-sheet'){ if (e.target===el || el.tagName==='BUTTON') document.getElementById('sheet').innerHTML=''; return; }
