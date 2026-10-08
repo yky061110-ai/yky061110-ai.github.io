@@ -16,7 +16,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=Noto+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
 /* Layout: one felt table with six seats on an oval rail; your hand and controls docked beneath it. Single dark card-room look. */
 :root{
@@ -584,7 +583,7 @@ function logName(s, e){
 
 /* ---------- 로비 ---------- */
 function renderLobby(){
-  const peerOk = typeof Peer !== 'undefined';
+  const peerOk = onlineSupported();
   app.innerHTML = `
   <div class="bar"><h1>홀덤 테이블</h1><button class="ghost" data-a="rules">족보·규칙</button></div>
   <section class="hero">
@@ -617,7 +616,7 @@ function renderLobby(){
       <p>방을 만들고 초대 링크를 보내세요. 링크를 연 친구는 이름만 정하면 바로 자리에 앉아요. 인원은 2~9명 중에서 정하고, 게임 중에도 바꿀 수 있어요.</p>
       <div class="stepper"><button data-a="hseats-" aria-label="최대 인원 줄이기" ${hostSeats<=MIN_SEATS?'disabled':''}>−</button><span class="num">${hostSeats}</span><span>명까지 참여</span><button data-a="hseats+" aria-label="최대 인원 늘리기" ${hostSeats>=MAX_SEATS?'disabled':''}>+</button></div>
       <button class="primary" data-a="host" ${peerOk?'':'disabled'}>방 만들기</button>
-      <p class="note ${peerOk?'':'warn'}">${peerOk ? '방을 만든 사람의 기기가 딜러 역할을 해요. 게임 중에는 이 페이지를 닫지 마세요.' : '온라인 연결 모듈을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요.'}</p>
+      <p class="note ${peerOk?'':'warn'}">${peerOk ? '방을 만든 사람의 기기가 딜러 역할을 해요. 게임 중에는 이 페이지를 닫지 마세요.' : '이 브라우저에서는 온라인 대전을 할 수 없어요. 최신 크롬이나 사파리로 열어 주세요.'}</p>
     </div>
   </div>`;
 }
@@ -762,7 +761,7 @@ function raiseLabel(s, i, to){ const p=s.seats[i]; if (to >= p.bet+p.chips) retu
 
 function inviteBox(s){
   // 게임이 시작되면 숨김 (위쪽 ‘초대 링크’ 버튼은 계속 사용 가능)
-  if (view!=='online' || net.role!=='host' || !net.hostId || s.stage!=='idle') return '';
+  if (view!=='online' || net.role!=='host' || !net.room || !net.mq || !net.mq.connected || s.stage!=='idle') return '';
   return `<div class="tablecode">초대 링크 <span class="num" id="invite-url" style="font-size:12px;letter-spacing:0;word-break:break-all;min-width:0">${esc(inviteLink())}</span><button class="ghost" data-a="invite">보내기</button></div>`;
 }
 
@@ -926,8 +925,99 @@ function scheduleLocal(){
 }
 function nextLocalHand(){ if (view!=='local' || localState.stage!=='done' || localGameOver(localState)) return; localState = startHand(localState, Date.now()); afterLocal(); }
 
-/* ================= 온라인 모드 (PeerJS: 방장 브라우저가 딜러) ================= */
-const net = {peer:null, role:null, hostId:'', conns:new Map(), conn:null, state:null, hostState:null, tick:null, status:'', retries:0, chat:[], lastChat:{}};
+/* ================= 온라인 모드 =================
+   방장 기기가 딜러. 메시지는 공개 MQTT 중계 서버를 거치고,
+   플레이어마다 따로 만든 키(ECDH P-256 → AES-GCM)로 암호화해서
+   중계 서버나 다른 사람은 카드·채팅 내용을 볼 수 없음. */
+const BROKERS = window.HOLDEM_BROKERS || ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://test.mosquitto.org:8081/mqtt'];
+const TOPIC_ROOT = 'yky-holdem/v1/';
+const net = {mq:null, role:null, room:'', broker:0, hostPub:'', keys:null, key:null, myPub:'', peers:new Map(), state:null, hostState:null, tick:null, helloTimer:null, failT:null, status:'', hostStatus:'', gotState:false, token:null, sendQ:Promise.resolve(), chat:[], lastChat:{}};
+const roomTopic = () => TOPIC_ROOT + net.room;
+
+/* ---------- 아주 작은 MQTT 3.1.1 클라이언트 (WebSocket, QoS 0) ---------- */
+const te = new TextEncoder(), td = new TextDecoder();
+function mqStr(str){ const b = typeof str==='string' ? te.encode(str) : str; const o = new Uint8Array(2+b.length); o[0]=b.length>>8; o[1]=b.length&255; o.set(b,2); return o; }
+function mqCat(...parts){ let n=0; parts.forEach(x=>n+=x.length); const o=new Uint8Array(n); let k=0; parts.forEach(x=>{ o.set(x,k); k+=x.length; }); return o; }
+function mqPacket(type, body){ const len=[]; let n=body.length; do { let d=n%128; n=Math.floor(n/128); if (n>0) d|=128; len.push(d); } while(n>0); return mqCat(Uint8Array.of(type, ...len), body); }
+class MiniMQTT {
+  constructor(url, o){ this.url=url; this.o=o; this.subs=new Set(); this.queue=[]; this.connected=false; this.ended=false; this.buf=new Uint8Array(0); this.retry=0; this.open(); }
+  open(){
+    if (this.ended) return;
+    let ws; try { ws = new WebSocket(this.url, ['mqtt']); } catch(_){ this.schedule(); return; }
+    this.ws = ws; ws.binaryType = 'arraybuffer'; this.buf = new Uint8Array(0);
+    ws.onopen = ()=>{ try { ws.send(this.pkConnect()); } catch(_){} };
+    ws.onmessage = e=>{ if (this.ws===ws) this.feed(new Uint8Array(e.data)); };
+    ws.onclose = ws.onerror = ()=>{
+      if (this.ws!==ws) return; this.ws = null;
+      const was = this.connected; this.connected = false; clearInterval(this.ping);
+      if (was && this.o.onDown) this.o.onDown();
+      this.schedule();
+    };
+  }
+  schedule(){ if (this.ended) return; clearTimeout(this.rt); const d = Math.min(6000, 600*Math.pow(1.6, this.retry++)); this.rt = setTimeout(()=>this.open(), d); }
+  kick(){ if (this.ended) return; if (this.connected){ this.raw(Uint8Array.of(0xC0,0)); return; } clearTimeout(this.rt); this.retry=0; if (this.ws){ const w=this.ws; this.ws=null; try{ w.close(); }catch(_){} } this.open(); }
+  pkConnect(){
+    let flags = 0x02; const pay = [mqStr(this.o.clientId)];
+    if (this.o.will){ flags |= 0x04 | (this.o.will.retain ? 0x20 : 0); pay.push(mqStr(this.o.will.topic), mqStr(this.o.will.payload)); }
+    return mqPacket(0x10, mqCat(mqStr('MQTT'), Uint8Array.of(4, flags, 0, 30), ...pay));
+  }
+  feed(chunk){
+    this.buf = mqCat(this.buf, chunk);
+    for(;;){
+      const b = this.buf; if (b.length < 2) return;
+      let len=0, mul=1, i=1, byte;
+      do { if (i >= b.length) return; byte = b[i++]; len += (byte & 127)*mul; mul *= 128; } while (byte & 128);
+      if (b.length < i+len) return;
+      const head = b[0], body = b.slice(i, i+len); this.buf = b.slice(i+len);
+      this.handle(head, body);
+    }
+  }
+  handle(head, body){
+    const type = head >> 4;
+    if (type===2){                                   // CONNACK
+      if (body[1]!==0){ try{ this.ws.close(); }catch(_){} return; }
+      this.connected = true; this.retry = 0;
+      if (this.subs.size) this.raw(this.pkSub([...this.subs]));
+      const q = this.queue; this.queue = []; q.forEach(pk=>this.raw(pk));
+      clearInterval(this.ping); this.ping = setInterval(()=>this.raw(Uint8Array.of(0xC0,0)), 20000);
+      if (this.o.onConnect) this.o.onConnect();
+    } else if (type===3){                            // PUBLISH
+      const qos = (head>>1)&3, tl = (body[0]<<8)|body[1];
+      const topic = td.decode(body.slice(2, 2+tl)), off = 2+tl+(qos?2:0);
+      if (this.o.onMessage) this.o.onMessage(topic, td.decode(body.slice(off)));
+    }
+  }
+  pkSub(topics){ const id = 1+randInt(65000); return mqPacket(0x82, mqCat(Uint8Array.of(id>>8, id&255), ...topics.map(t=>mqCat(mqStr(t), Uint8Array.of(0))))); }
+  raw(pk){ try { if (this.ws && this.ws.readyState===1) this.ws.send(pk); } catch(_){} }
+  subscribe(t){ this.subs.add(t); if (this.connected) this.raw(this.pkSub([t])); }
+  publish(topic, str, retain){
+    const pk = mqPacket(0x30 | (retain?1:0), mqCat(mqStr(topic), te.encode(str)));
+    if (this.connected) this.raw(pk); else { this.queue.push(pk); if (this.queue.length>100) this.queue.shift(); }
+  }
+  end(){ this.ended = true; clearTimeout(this.rt); clearInterval(this.ping); this.raw(Uint8Array.of(0xE0,0)); const w=this.ws; this.ws=null; this.connected=false; setTimeout(()=>{ try{ w && w.close(); }catch(_){} }, 50); }
+}
+
+/* ---------- 암호화 ---------- */
+const b64u = buf => { let s=''; new Uint8Array(buf).forEach(c=>s+=String.fromCharCode(c)); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); };
+const ub64u = str => { const s = String(str).replace(/-/g,'+').replace(/_/g,'/'); return Uint8Array.from(atob(s + '==='.slice((s.length+3)%4)), c=>c.charCodeAt(0)); };
+const EC = {name:'ECDH', namedCurve:'P-256'};
+async function newKeys(){ const k = await crypto.subtle.generateKey(EC, true, ['deriveKey']); return {privateKey:k.privateKey, pub: b64u(await crypto.subtle.exportKey('raw', k.publicKey))}; }
+async function guestKeys(){
+  const saved = tabStore('holdem.gk');
+  if (saved){ try { const j = JSON.parse(saved); return {privateKey: await crypto.subtle.importKey('jwk', j.priv, EC, true, ['deriveKey']), pub:j.pub}; } catch(_){} }
+  const k = await crypto.subtle.generateKey(EC, true, ['deriveKey']);
+  const pub = b64u(await crypto.subtle.exportKey('raw', k.publicKey));
+  tabStore('holdem.gk', JSON.stringify({priv: await crypto.subtle.exportKey('jwk', k.privateKey), pub}));
+  return {privateKey:k.privateKey, pub};
+}
+async function deriveKey(priv, pubStr){
+  const pub = await crypto.subtle.importKey('raw', ub64u(pubStr), EC, false, []);
+  return crypto.subtle.deriveKey({name:'ECDH', public:pub}, priv, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+}
+async function sealBox(key, obj){ const iv = crypto.getRandomValues(new Uint8Array(12)); const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, te.encode(JSON.stringify(obj))); return b64u(iv)+'.'+b64u(ct); }
+async function openBox(key, box){ const [a,b] = String(box).split('.'); const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:ub64u(a)}, key, ub64u(b)); return JSON.parse(td.decode(pt)); }
+function genId(n){ const A='abcdefghijkmnpqrstuvwxyz23456789'; let c=''; for (let i=0;i<n;i++) c+=A[randInt(A.length)]; return c; }
+const onlineSupported = () => !!(window.WebSocket && window.crypto && crypto.subtle);
 
 /* ---------- 채팅 ---------- */
 const EMOJIS = '😀 😂 🤣 😊 😍 😎 🤔 😮 😭 😡 😱 🥶 🤑 😴 🤐 😈 🙏 👍 👎 👏 🙌 💪 🔥 💯 🎉 💰 💸 🍀 🃏 ♠️ ♥️ ♦️ ♣️ ❤️ 💀 🤡 👀 ✌️ 👋 🍻'.split(' ');
@@ -938,7 +1028,7 @@ function chatPost(pid, name, text){
   text = cleanChat(text); if (!text) return;
   const now = Date.now(); if (now - (net.lastChat[pid]||0) < 400) return; net.lastChat[pid] = now;
   const m = {pid, n: name, text, ts: now};
-  for (const c of net.conns.values()){ try { if (c.conn.open) c.conn.send({t:'chat', m}); } catch(_){} }
+  for (const peer of net.peers.values()) sendTo(peer, {t:'chat', m});
   receiveChat(m);
 }
 function receiveChat(m){
@@ -953,8 +1043,7 @@ function receiveChat(m){
 function sendChat(text){
   text = cleanChat(text); if (!text) return false;
   if (net.role==='host'){ chatPost(me.pid, me.name, text); return true; }
-  if (net.conn && net.conn.open){ net.conn.send({t:'chat', text}); return true; }
-  toast('방장과 연결되어 있지 않아요.'); return false;
+  return sendNet({t:'chat', text});
 }
 function renderChat(scroll){
   const box = document.getElementById('chatbox'); if (!box) return;
@@ -985,9 +1074,16 @@ function insertEmoji(e){
   const pos = a + e.length; inp.focus(); try { inp.setSelectionRange(pos, pos); } catch(_){}
 }
 
-function roomFromURL(){ try { return new URLSearchParams(location.search).get('room'); } catch(_){ return null; } }
-function setRoomURL(id){ try { const u = new URL(location.href); if (id) u.searchParams.set('room', id); else u.searchParams.delete('room'); history.replaceState(null, '', u); } catch(_){} }
-function inviteLink(){ const u = new URL(location.href); u.search = ''; u.hash = ''; u.searchParams.set('room', net.hostId); return u.toString(); }
+function roomFromURL(){
+  try {
+    const h = new URLSearchParams(location.hash.slice(1));
+    const r = h.get('r'), k = h.get('k'), b = +h.get('b')||0;
+    if (r && /^[a-z0-9]{10}$/.test(r) && k && /^[A-Za-z0-9_-]{80,100}$/.test(k)) return {r, k, b: Math.max(0, Math.min(BROKERS.length-1, b))};
+  } catch(_){}
+  return null;
+}
+function setRoomURL(){ try { if (location.hash) history.replaceState(null, '', location.pathname + location.search); } catch(_){} }
+function inviteLink(){ return `${location.origin}${location.pathname}#r=${net.room}&k=${net.hostPub}&b=${net.broker}`; }
 
 // 상대에게 보내는 화면용 상태: 덱과 남의 카드는 숨김
 function viewFor(s, pid){
@@ -1001,51 +1097,89 @@ function viewFor(s, pid){
   return v;
 }
 
-function hostRoom(){
+async function hostRoom(){
   closeNet();
-  view = 'online'; net.role = 'host'; net.state = null; net.status = ''; ui.seenCards = new Set();
-  const id = 'holdem-' + genCode().toLowerCase() + genCode().toLowerCase();
-  net.peer = new Peer(id);
+  if (!onlineSupported()){ toast('이 브라우저에서는 온라인 대전을 할 수 없어요. 최신 크롬이나 사파리로 열어 주세요.'); return; }
+  view = 'online'; net.role = 'host'; net.state = null; net.status = '중계 서버에 연결하는 중…'; ui.seenCards = new Set();
+  const token = net.token = {};
   render();
-  net.peer.on('open', pid=>{
-    net.hostId = pid; setRoomURL(pid);
-    const s = emptyTable(hostSeats, chipChoice); s.seats[0] = makeSeat(me.pid, {name: me.name, chips:s.startChips}); logIt(s, 0, `방을 열었어요 (최대 ${hostSeats}명 · 칩 ${fmt(s.startChips)} · 블라인드 ${s.sb}/${s.bb})`);
-    net.hostState = s; net.status = '';
-    hostBroadcast();
-  });
-  net.peer.on('connection', conn=>{
-    conn.on('data', d=>onHostMsg(conn, d));
-    conn.on('close', ()=>{
-      const c = net.conns.get(conn.peer); net.conns.delete(conn.peer);
-      if (c && net.hostState){ const i = net.hostState.seats.findIndex(p=>p && p.id===c.pid); if (i>=0){ const n = clone(net.hostState); n.seats[i].away = true; logIt(n, i, '연결 끊김'); net.hostState = n; hostBroadcast(); } }
-    });
-  });
-  net.peer.on('disconnected', ()=>{ if (net.peer && !net.peer.destroyed) net.peer.reconnect(); });
-  net.peer.on('error', e=>{
-    if (e.type==='unavailable-id' && net.retries++<3){ hostRoom(); return; }
-    if (e.type==='peer-unavailable') return;
-    net.status = netErrorText(e); render();
-  });
+  net.keys = await newKeys(); net.hostPub = net.keys.pub;
+  if (net.token!==token) return;
+  net.room = genId(10);
+  const s = emptyTable(hostSeats, chipChoice); s.seats[0] = makeSeat(me.pid, {name: me.name, chips:s.startChips});
+  logIt(s, 0, `방을 열었어요 (최대 ${hostSeats}명 · 칩 ${fmt(s.startChips)} · 블라인드 ${s.sb}/${s.bb})`);
+  net.hostState = s; net.state = viewFor(s, me.pid);
   net.tick = setInterval(hostTick, 1000);
+  connectHost(0, token, 0);
+  render();
 }
-function onHostMsg(conn, d){
-  if (!d || typeof d!=='object') return;
+function connectHost(bi, token, round){
+  if (net.token!==token) return;
+  net.broker = bi;
+  const T = roomTopic();
+  const mq = new MiniMQTT(BROKERS[bi], {
+    clientId: 'h' + genId(14),
+    will: {topic: T+'/status', payload: 'offline', retain: true},
+    onConnect: ()=>{ if (net.mq!==mq) return; clearTimeout(net.failT); net.status = ''; mq.subscribe(T+'/host'); mq.publish(T+'/status', 'online', true); hostBroadcast(); },
+    onDown: ()=>{ if (net.mq!==mq) return; net.status = '중계 서버 연결이 끊겨 다시 연결하는 중…'; render(); },
+    onMessage: (topic, payload)=>{ if (net.mq===mq && topic===T+'/host') onHostMsg(payload); },
+  });
+  net.mq = mq;
+  // 처음 연결이 안 되면 다음 중계 서버로 넘어감 (초대 링크에 어느 서버인지 들어감)
+  clearTimeout(net.failT);
+  net.failT = setTimeout(()=>{
+    if (net.mq!==mq || mq.connected) return;
+    mq.end();
+    if (bi+1 < BROKERS.length) connectHost(bi+1, token, round);
+    else { net.status = '중계 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요. 계속 다시 시도하는 중…'; render(); connectHost(0, token, round+1); }
+  }, 6500);
+}
+async function onHostMsg(raw){
+  let d; try { d = JSON.parse(raw); } catch(_){ return; }
+  if (!d || typeof d.pid!=='string' || !/^p[0-9a-f]{16}$/.test(d.pid)) return;
+  const pid = d.pid;
+  if (pid===me.pid) return;
+  if (d.t==='bye'){ markAway(pid, true); return; }
   if (d.t==='hello'){
-    const pid = String(d.pid||'').slice(0,40); if (!pid) return;
-    const name = cleanName(d.name);
-    net.conns.set(conn.peer, {conn, pid, name});
-    const n = clone(net.hostState);
-    let i = n.seats.findIndex(p=>p && p.id===pid);
-    if (i>=0){ n.seats[i].away = false; n.seats[i].name = name; logIt(n, i, '다시 연결됨'); }
-    else { i = n.seats.findIndex(p=>!p); if (i>=0){ n.seats[i] = makeSeat(pid, {name, chips:n.startChips||START_CHIPS}); logIt(n, i, '입장'); } }
-    net.hostState = n; hostBroadcast();
-    try { conn.send({t:'chatlog', list: net.chat.slice(-30)}); } catch(_){}
+    if (typeof d.pub!=='string' || d.pub.length>120) return;
+    let peer = net.peers.get(pid);
+    if (peer && peer.pub!==d.pub) return;       // 같은 ID를 다른 키로 쓰는 경우(사칭) 무시
+    try {
+      const key = peer ? peer.key : await deriveKey(net.keys.privateKey, d.pub);
+      const body = await openBox(key, d.box);
+      if (!peer){ peer = {pid, pub:d.pub, key, q:Promise.resolve(), name:''}; net.peers.set(pid, peer); }
+      peer.name = cleanName(body.name);
+      hostWelcome(peer);
+    } catch(_){}
     return;
   }
-  const c = net.conns.get(conn.peer); if (!c) return;
-  if (d.t==='chat'){ chatPost(c.pid, c.name, d.text); return; }
-  if (d.t==='rename') c.name = cleanName(d.name);
-  hostApply(c.pid, c.name, d);
+  if (d.t==='msg'){
+    const peer = net.peers.get(pid); if (!peer) return;
+    let m; try { m = await openBox(peer.key, d.box); } catch(_){ return; }
+    if (!m || typeof m!=='object') return;
+    markAway(pid, false);
+    if (m.t==='chat'){ chatPost(pid, peer.name, m.text); return; }
+    if (m.t==='rename') peer.name = cleanName(m.name);
+    hostApply(pid, peer.name, m);
+  }
+}
+function hostWelcome(peer){
+  const n = clone(net.hostState);
+  let i = n.seats.findIndex(p=>p && p.id===peer.pid);
+  if (i>=0){ if (n.seats[i].away) logIt(n, i, '다시 연결됨'); n.seats[i].away = false; n.seats[i].name = peer.name; }
+  else { i = n.seats.findIndex(p=>!p); if (i>=0){ n.seats[i] = makeSeat(peer.pid, {name: peer.name, chips:n.startChips||START_CHIPS}); logIt(n, i, '입장'); } }
+  net.hostState = n; hostBroadcast();
+  sendTo(peer, {t:'chatlog', list: net.chat.slice(-30)});
+}
+function markAway(pid, away){
+  const s = net.hostState; if (!s) return;
+  const i = s.seats.findIndex(p=>p && p.id===pid); if (i<0 || !!s.seats[i].away===away) return;
+  const n = clone(s); n.seats[i].away = away; logIt(n, i, away ? '연결 끊김' : '다시 연결됨');
+  net.hostState = n; hostBroadcast();
+}
+function sendTo(peer, obj){
+  const T = roomTopic(), mq = net.mq;
+  peer.q = peer.q.then(()=>sealBox(peer.key, obj)).then(box=>{ if (mq && net.mq===mq) mq.publish(T+'/p/'+peer.pid, box); }).catch(()=>{});
 }
 function hostApply(pid, name, d){
   const s = net.hostState; if (!s) return;
@@ -1092,8 +1226,8 @@ function standState(s, i, now){
   return n;
 }
 function hostBroadcast(){
-  const s = net.hostState;
-  for (const c of net.conns.values()){ try { if (c.conn.open) c.conn.send({t:'state', s: viewFor(s, c.pid)}); } catch(_){} }
+  const s = net.hostState; if (!s) return;
+  for (const peer of net.peers.values()) sendTo(peer, {t:'state', s: viewFor(s, peer.pid)});
   net.state = viewFor(s, me.pid);
   if (view==='online') render();
 }
@@ -1114,55 +1248,86 @@ function hostTick(){
   }
 }
 
-function joinRoom(id){
+async function joinRoom(info){
   closeNet();
-  view = 'online'; net.role = 'guest'; net.hostId = id; net.state = null; net.status = ''; ui.seenCards = new Set();
+  if (!onlineSupported()){ view='online'; net.status = '이 브라우저에서는 온라인 대전을 할 수 없어요. 최신 크롬이나 사파리로 열어 주세요.'; render(); return; }
+  view = 'online'; net.role = 'guest'; net.room = info.r; net.broker = info.b; net.hostPub = info.k;
+  net.state = null; net.gotState = false; net.hostStatus = ''; net.status = ''; ui.seenCards = new Set();
+  const token = net.token = {};
   render();
-  net.peer = new Peer();
-  net.peer.on('open', ()=>{
-    const conn = net.peer.connect(id, {reliable:true}); net.conn = conn;
-    const giveUp = setTimeout(()=>{ if (!conn.open){ net.status = '방에 연결하지 못했어요. 방장이 페이지를 열어 두었는지 확인해 주세요.'; render(); } }, 12000);
-    conn.on('open', ()=>{ clearTimeout(giveUp); conn.send({t:'hello', pid: me.pid, name: me.name}); net.status = ''; render(); });
-    conn.on('data', d=>{
+  try { net.keys = await guestKeys(); net.myPub = net.keys.pub; net.key = await deriveKey(net.keys.privateKey, info.k); }
+  catch(_){ net.status = '초대 링크가 올바르지 않아요. 방장에게 링크를 다시 받아 주세요.'; render(); return; }
+  if (net.token!==token) return;
+  const T = roomTopic(), started = Date.now();
+  const sayHello = async ()=>{ const mq = net.mq; if (!mq || !mq.connected) return; const box = await sealBox(net.key, {name: me.name}); mq.publish(T+'/host', JSON.stringify({t:'hello', pid: me.pid, pub: net.myPub, box})); };
+  const mq = new MiniMQTT(BROKERS[info.b] || BROKERS[0], {
+    clientId: 'g' + genId(14),
+    will: {topic: T+'/host', payload: JSON.stringify({t:'bye', pid: me.pid}), retain: false},
+    onConnect: ()=>{ if (net.mq!==mq) return; mq.subscribe(T+'/p/'+me.pid); mq.subscribe(T+'/status'); sayHello(); },
+    onDown: ()=>{ if (net.mq!==mq) return; net.status = '연결이 끊겨 다시 연결하는 중…'; render(); },
+    onMessage: async (topic, payload)=>{
+      if (net.mq!==mq) return;
+      if (topic===T+'/status'){
+        net.hostStatus = payload;
+        if (payload==='online'){ if (!net.gotState) sayHello(); else if (net.status){ net.status=''; render(); } }
+        else if (payload==='offline'){ net.status = '방장 연결이 잠시 끊겼어요. 방장이 게임 화면으로 돌아오면 이어서 해요.'; render(); }
+        else if (payload==='closed'){ net.status = '방장이 방을 닫았어요.'; render(); }
+        return;
+      }
+      let d; try { d = await openBox(net.key, payload); } catch(_){ return; }
       if (!d) return;
-      if (d.t==='state'){ net.state = d.s; render(); }
+      if (d.t==='state'){ net.gotState = true; if (net.hostStatus!=='offline' && net.hostStatus!=='closed') net.status = ''; net.state = d.s; render(); }
       else if (d.t==='chat') receiveChat(d.m);
       else if (d.t==='chatlog' && Array.isArray(d.list)){ net.chat = []; d.list.slice(-CHAT_MAX).forEach(m=>{ if (m && m.text) net.chat.push({pid:String(m.pid||''), n:cleanName(m.n), text:cleanChat(m.text), ts:+m.ts||0}); }); renderChat(true); }
-    });
-    conn.on('close', ()=>{ if (view==='online'){ net.status = '방장과 연결이 끊겼어요. 방장이 페이지를 닫았을 수 있어요.'; render(); } });
+    },
   });
-  net.peer.on('disconnected', ()=>{ if (net.peer && !net.peer.destroyed) net.peer.reconnect(); });
-  net.peer.on('error', e=>{ net.status = netErrorText(e); render(); });
+  net.mq = mq;
+  // 방장 응답이 올 때까지 4초마다 다시 인사
+  net.helloTimer = setInterval(()=>{
+    if (net.mq!==mq || net.gotState) return;
+    sayHello();
+    if (Date.now()-started > 9000 && net.hostStatus!=='closed'){
+      net.status = !mq.connected ? '중계 서버에 연결하는 중이에요. 인터넷 연결을 확인해 주세요.'
+        : net.hostStatus==='offline' ? '방장 연결이 잠시 끊겼어요. 방장이 게임 화면으로 돌아오면 바로 입장돼요.'
+        : '방장의 응답을 기다리는 중이에요. 방장 기기에서 게임 화면이 켜져 있는지 확인해 주세요.';
+      render();
+    }
+  }, 4000);
   net.tick = setInterval(tickTimers, 1000);
 }
-function netErrorText(e){
-  const t = e && e.type;
-  if (t==='peer-unavailable') return '방을 찾을 수 없어요. 방장이 페이지를 닫았거나 링크가 만료됐을 수 있어요.';
-  if (t==='network' || t==='server-error' || t==='socket-error' || t==='socket-closed') return '연결 서버에 닿지 못했어요. 인터넷 연결을 확인해 주세요.';
-  if (t==='browser-incompatible') return '이 브라우저에서는 온라인 대전을 할 수 없어요. 크롬이나 사파리 최신 버전으로 열어 주세요.';
-  return '연결 오류가 발생했어요. 새로고침해 주세요.';
-}
 function closeNet(){
-  clearInterval(net.tick); net.tick = null;
-  try { if (net.peer) net.peer.destroy(); } catch(_){}
-  net.peer = null; net.conn = null; net.conns = new Map(); net.hostState = null; net.state = null; net.retries = 0;
+  clearInterval(net.tick); clearInterval(net.helloTimer); clearTimeout(net.failT);
+  const mq = net.mq;
+  if (mq){
+    const T = roomTopic();
+    try { if (net.role==='host') mq.publish(T+'/status', 'closed', true); else mq.publish(T+'/host', JSON.stringify({t:'bye', pid: me.pid})); } catch(_){}
+    setTimeout(()=>mq.end(), 250);
+  }
+  Object.assign(net, {mq:null, token:null, peers:new Map(), hostState:null, state:null, key:null, keys:null, gotState:false, hostStatus:'', status:'', tick:null, helloTimer:null, sendQ:Promise.resolve()});
   net.chat = []; net.lastChat = {}; ui.bubbles = {};
   const ci = document.getElementById('chat-in'); if (ci) ci.value = '';
   const pad = document.getElementById('emoji-pad'); if (pad) pad.hidden = true;
 }
 function sendNet(d){
-  if (net.role==='host') hostApply(me.pid, me.name, d);
-  else if (net.conn && net.conn.open) net.conn.send(d);
-  else toast('방장과 연결되어 있지 않아요.');
+  if (net.role==='host'){ hostApply(me.pid, me.name, d); return true; }
+  const mq = net.mq;
+  if (!mq || !net.key){ toast('방장과 연결되어 있지 않아요.'); return false; }
+  const T = roomTopic();
+  net.sendQ = net.sendQ.then(()=>sealBox(net.key, d)).then(box=>mq.publish(T+'/host', JSON.stringify({t:'msg', pid: me.pid, box}))).catch(()=>{});
+  if (!mq.connected) toast('연결이 잠시 끊겼어요. 다시 연결되면 전송돼요.');
+  return true;
 }
+// 휴대폰에서 다른 앱에 다녀오면 바로 다시 연결
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden && net.mq) net.mq.kick(); });
+
 async function shareInvite(){
+  if (!net.mq || !net.mq.connected || !net.room){ toast('중계 서버에 연결되면 초대 링크를 보낼 수 있어요. 잠시만 기다려 주세요.'); return; }
   const url = inviteLink();
   if (navigator.share){ try { await navigator.share({title:'홀덤 테이블 초대', text:'같이 홀덤 해요! 링크를 열면 바로 자리에 앉아요.', url}); return; } catch(e){ if (e && e.name==='AbortError') return; } }
   try { await navigator.clipboard.writeText(url); toast('초대 링크를 복사했어요.'); }
   catch(_){ const el = document.getElementById('invite-url'); if (el){ const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast('링크를 길게 눌러 복사하세요.'); }
 }
 function leaveToLobby(){ closeNet(); clearTimeout(localTimer); view='lobby'; setRoomURL(null); render(); }
-function genCode(){ const A='abcdefghjkmnpqrstuvwxyz23456789'; let c=''; for (let i=0;i<4;i++) c+=A[randInt(A.length)]; return c; }
 
 /* ================= 이벤트 ================= */
 function render(){
@@ -1232,7 +1397,7 @@ function doAction(a){
 }
 
 const startRoom = roomFromURL();
-if (startRoom && /^holdem-[a-z0-9]{8}$/.test(startRoom)){ pendingRoom = startRoom; view = 'join'; }
+if (startRoom){ pendingRoom = startRoom; view = 'join'; }
 render();
 
 if ('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
