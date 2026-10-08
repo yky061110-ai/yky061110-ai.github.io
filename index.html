@@ -294,6 +294,19 @@ button .emo-i,.bubble .emo-i{vertical-align:middle}
 .qchat.open .qchat-open{display:none}
 .qchat.open input{display:block;flex:1;min-width:0;height:100%;border:1px solid var(--brass);border-radius:999px;background:var(--bg);color:var(--ink);font:16px var(--f-body);padding:0 10px}
 .qchat.open .qchat-send{display:grid;place-items:center;flex:none;width:30px;height:30px;border:0;border-radius:50%;background:var(--brass);color:var(--brass-ink);font:700 16px/1 var(--f-num)}
+
+/* 내 족보 순위 사다리와 확률 */
+.hrank{display:flex;flex-direction:column;gap:4px;margin-top:2px}
+.ladder{display:grid;grid-template-columns:repeat(10,1fr);gap:2px;max-width:260px}
+.ladder i{font-style:normal;font-size:9px;line-height:1;text-align:center;padding:4px 0;border-radius:4px;background:rgba(255,255,255,.06);color:var(--faint);white-space:nowrap;overflow:hidden}
+.ladder i.up{background:rgba(255,255,255,.04)}
+.ladder i.on{background:var(--brass);color:var(--brass-ink);font-weight:700}
+.hr-txt{font-size:12px;color:var(--muted)}
+.hr-txt b{color:var(--ink);font-weight:600}
+.info-prob{font-size:13px!important;color:var(--muted)!important}
+.info-prob b{color:var(--brass)}
+.rank .prob{font-size:12px;color:var(--muted)}
+.rank .prob b{color:var(--brass);font-weight:600}
 @media (max-width:420px){
   .mine .hole{--cw:50px}
   .hero h2{font-size:38px}
@@ -776,25 +789,35 @@ const BACK_SVG = `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y=
   <rect x="13" y="13" width="74" height="114" rx="3" fill="none" stroke="#e9dcc0" stroke-width=".8" opacity=".7"/></svg>`;
 /* ---------- 족보 용어 설명 ---------- */
 const HAND_INFO = {
-  '하이카드':        {rank:10, ex:['Ah','Js','8d','5c','3s'], d:'아무 조합도 없는 패예요. 가장 높은 카드끼리 비교하고, 같으면 그다음 높은 카드로 비교해요.'},
-  '원 페어':         {rank:9,  ex:['9s','9h','Ad','Kc','4s'], d:'같은 숫자 2장이에요. 페어 숫자가 높은 쪽이 이기고, 같으면 나머지 카드(키커)로 비교해요.'},
-  '투 페어':         {rank:8,  ex:['Js','Jh','5d','5c','As'], d:'서로 다른 페어가 두 개예요. 높은 페어부터 비교하고, 그다음 낮은 페어, 마지막으로 남은 한 장을 비교해요.'},
-  '트리플':          {rank:7,  ex:['7s','7h','7d','Kc','2s'], d:'같은 숫자 3장이에요. "트립스" 또는 "셋"이라고도 불러요. 숫자가 높은 트리플이 이겨요.'},
-  '스트레이트':      {rank:6,  ex:['Ts','9h','8d','7c','6s'], d:'무늬와 상관없이 숫자가 연속된 5장이에요. A는 가장 높게(10-J-Q-K-A)도, 가장 낮게(A-2-3-4-5)도 쓸 수 있어요.'},
-  '플러시':          {rank:5,  ex:['Ad','Jd','8d','6d','2d'], d:'숫자와 상관없이 같은 무늬 5장이에요. 가장 높은 카드부터 차례로 비교해요.'},
-  '풀 하우스':       {rank:4,  ex:['Ks','Kh','Kd','4c','4s'], d:'트리플 + 원 페어 조합이에요. 트리플 숫자가 높은 쪽이 이기고, 같으면 페어 숫자로 비교해요.'},
-  '포카드':          {rank:3,  ex:['Qs','Qh','Qd','Qc','7s'], d:'같은 숫자 4장이에요. 거의 지지 않는 아주 강한 패예요.'},
-  '스트레이트 플러시':{rank:2, ex:['9h','8h','7h','6h','5h'], d:'같은 무늬로 숫자가 연속된 5장이에요. 로열 플러시 다음으로 강해요.'},
-  '로열 플러시':     {rank:1,  ex:['As','Ks','Qs','Js','Ts'], d:'같은 무늬의 10-J-Q-K-A예요. 홀덤에서 가장 강한 패예요.'},
-  '포켓 페어':       {ex:['8s','8h'], d:'처음 받은 개인 카드 2장이 같은 숫자예요. 공용 카드가 깔리기 전부터 원 페어를 들고 시작하는 좋은 출발이에요.'},
-  '수딧':            {ex:['Kh','9h'], d:'처음 받은 개인 카드 2장의 무늬가 같아요(수트가 같다는 뜻). 같은 무늬가 3장 더 깔리면 플러시가 돼요.'},
-  '오프수트':        {ex:['Ad','7c'], d:'처음 받은 개인 카드 2장의 무늬가 서로 달라요. 아직 아무 조합도 없는 상태예요.'},
+  '하이카드':        {p:'17.4%', once:'약 6판에 1번', rank:10, ex:['Ah','Js','8d','5c','3s'], d:'아무 조합도 없는 패예요. 가장 높은 카드끼리 비교하고, 같으면 그다음 높은 카드로 비교해요.'},
+  '원 페어':         {p:'43.8%', once:'약 2판에 1번', rank:9,  ex:['9s','9h','Ad','Kc','4s'], d:'같은 숫자 2장이에요. 페어 숫자가 높은 쪽이 이기고, 같으면 나머지 카드(키커)로 비교해요.'},
+  '투 페어':         {p:'23.5%', once:'약 4판에 1번', rank:8,  ex:['Js','Jh','5d','5c','As'], d:'서로 다른 페어가 두 개예요. 높은 페어부터 비교하고, 그다음 낮은 페어, 마지막으로 남은 한 장을 비교해요.'},
+  '트리플':          {p:'4.83%', once:'약 21판에 1번', rank:7,  ex:['7s','7h','7d','Kc','2s'], d:'같은 숫자 3장이에요. "트립스" 또는 "셋"이라고도 불러요. 숫자가 높은 트리플이 이겨요.'},
+  '스트레이트':      {p:'4.62%', once:'약 22판에 1번', rank:6,  ex:['Ts','9h','8d','7c','6s'], d:'무늬와 상관없이 숫자가 연속된 5장이에요. A는 가장 높게(10-J-Q-K-A)도, 가장 낮게(A-2-3-4-5)도 쓸 수 있어요.'},
+  '플러시':          {p:'3.03%', once:'약 33판에 1번', rank:5,  ex:['Ad','Jd','8d','6d','2d'], d:'숫자와 상관없이 같은 무늬 5장이에요. 가장 높은 카드부터 차례로 비교해요.'},
+  '풀 하우스':       {p:'2.60%', once:'약 38판에 1번', rank:4,  ex:['Ks','Kh','Kd','4c','4s'], d:'트리플 + 원 페어 조합이에요. 트리플 숫자가 높은 쪽이 이기고, 같으면 페어 숫자로 비교해요.'},
+  '포카드':          {p:'0.168%', once:'약 595판에 1번', rank:3,  ex:['Qs','Qh','Qd','Qc','7s'], d:'같은 숫자 4장이에요. 거의 지지 않는 아주 강한 패예요.'},
+  '스트레이트 플러시':{p:'0.028%', once:'약 3,591판에 1번', rank:2, ex:['9h','8h','7h','6h','5h'], d:'같은 무늬로 숫자가 연속된 5장이에요. 로열 플러시 다음으로 강해요.'},
+  '로열 플러시':     {p:'0.0032%', once:'약 30,940판에 1번', rank:1,  ex:['As','Ks','Qs','Js','Ts'], d:'같은 무늬의 10-J-Q-K-A예요. 홀덤에서 가장 강한 패예요.'},
+  '포켓 페어':       {p:'5.88%', once:'약 17판에 1번', ex:['8s','8h'], d:'처음 받은 개인 카드 2장이 같은 숫자예요. 공용 카드가 깔리기 전부터 원 페어를 들고 시작하는 좋은 출발이에요.'},
+  '수딧':            {p:'23.5%', once:'약 4판에 1번', ex:['Kh','9h'], d:'처음 받은 개인 카드 2장의 무늬가 같아요(수트가 같다는 뜻). 같은 무늬가 3장 더 깔리면 플러시가 돼요.'},
+  '오프수트':        {p:'70.6%', once:'10판 중 7번꼴', ex:['Ad','7c'], d:'처음 받은 개인 카드 2장의 무늬가 서로 달라요. 아직 아무 조합도 없는 상태예요.'},
 };
+const LADDER = ['로열 플러시','스트레이트 플러시','포카드','풀 하우스','플러시','스트레이트','트리플','투 페어','원 페어','하이카드'];
+const LADDER_SHORT = ['로플','스플','포카','풀하','플러','스트','트리','투페','원페','하이'];
+// 지금 내 족보가 10단계 중 어디인지 + 나올 확률
+function handRankHTML(term){
+  const it = HAND_INFO[term]; if (!it) return '';
+  if (!it.rank) return `<span class="hrank"><span class="hr-txt">시작 패 · 나올 확률 <b>${it.p}</b></span></span>`;
+  const cells = LADDER.map((n,i)=>`<i class="${i+1===it.rank?'on':''}${i+1<it.rank?' up':''}" title="${i+1}. ${n}">${LADDER_SHORT[i]}</i>`).join('');
+  return `<span class="hrank"><span class="ladder" aria-label="족보 순위">${cells}</span><span class="hr-txt">10단계 중 <b>${it.rank}번째</b> · 나올 확률 <b>${it.p}</b></span></span>`;
+}
 function infoPopHTML(term){
   const it = HAND_INFO[term]; if (!it) return '';
   return `<div class="info-pop" role="dialog" aria-label="${term} 설명">
     <div class="info-head"><b>${term}</b>${it.rank ? `<span class="info-rank">족보 10단계 중 ${it.rank}번째로 강함</span>` : `<span class="info-rank">시작 패 용어</span>`}<button class="info-x" data-a="info-close" aria-label="닫기">×</button></div>
     <p>${it.d}</p>
+    <p class="info-prob">${it.rank ? '7장(내 카드 2 + 공용 5)으로 이 족보가 나올 확률' : '처음 받은 2장이 이렇게 나올 확률'} <b>${it.p}</b> · ${it.once}</p>
     <div class="info-ex">${it.ex.map(c=>cardHTML(c,{mini:true})).join('')}</div>
   </div>`;
 }
@@ -1271,7 +1294,7 @@ function renderDock(s, mi, now){
     if (p.folded) handTxt = '폴드함';
   }
   const holes = p.inHand && p.cards.length ? p.cards.map(c=>cardHTML(c,{animate:true,key:s.handNo+'m', dim:p.folded})).join('') : cardHTML(null)+cardHTML(null);
-  const mine = `<div class="mine"><div class="hole">${holes}</div><div class="info"><span class="hand">${esc(handTxt || (s.stage==='idle'?'대기 중':'이번 핸드 관전'))}${HAND_INFO[handTxt] ? `<button class="info-btn${ui.infoOpen?' on':''}" data-a="info" aria-label="${handTxt} 뜻 보기" aria-expanded="${!!ui.infoOpen}">i</button>` : ''}</span><span class="sub">칩 <b class="num">${fmt(p.chips)}</b>${p.bet?` · 이번 라운드 베팅 <span class="num">${fmt(p.bet)}</span>`:''}</span></div></div>`;
+  const mine = `<div class="mine"><div class="hole">${holes}</div><div class="info"><span class="hand">${esc(handTxt || (s.stage==='idle'?'대기 중':'이번 핸드 관전'))}${HAND_INFO[handTxt] ? `<button class="info-btn${ui.infoOpen?' on':''}" data-a="info" aria-label="${handTxt} 뜻 보기" aria-expanded="${!!ui.infoOpen}">i</button>` : ''}</span>${p.inHand && !p.folded ? handRankHTML(handTxt) : ''}<span class="sub">칩 <b class="num">${fmt(p.chips)}</b>${p.bet?` · 이번 라운드 베팅 <span class="num">${fmt(p.bet)}</span>`:''}</span></div></div>`;
 
   let controls = '';
   if (BETTING.has(s.stage) && s.toAct===mi){
@@ -1371,7 +1394,8 @@ function openRules(){
   document.getElementById('sheet').innerHTML = `<div class="sheet" data-a="close-sheet"><div class="inner" role="dialog" aria-label="족보와 규칙">
     <div class="row" style="justify-content:space-between"><h3>족보 · 규칙</h3><button class="ghost" data-a="close-sheet">닫기</button></div>
     <h4>핸드 순위 (위가 강함)</h4>
-    <div class="scroll"><table class="rank">${ex.map((e,k)=>`<tr><td>${k+1}</td><td><span class="nm">${e[0]}</span><br><span class="note">${e[1]}</span></td><td><div class="ex">${e[2].map(c=>cardHTML(c,{mini:true})).join('')}</div></td></tr>`).join('')}</table></div>
+    <p class="note" style="margin:0 0 6px">확률: 7장(내 카드 2장 + 공용 카드 5장)으로 만든 최종 족보 기준</p>
+    <div class="scroll"><table class="rank">${ex.map((e,k)=>`<tr><td>${k+1}</td><td><span class="nm">${e[0]}</span><br><span class="note">${e[1]}</span><br><span class="prob"><b>${HAND_INFO[e[0]].p}</b> · ${HAND_INFO[e[0]].once}</span></td><td><div class="ex">${e[2].map(c=>cardHTML(c,{mini:true})).join('')}</div></td></tr>`).join('')}</table></div>
     <h4>진행 순서</h4>
     <div class="flow"><div><b>프리플랍</b><span>개인 2장</span></div><div><b>플랍</b><span>공용 3장</span></div><div><b>턴</b><span>공용 1장</span></div><div><b>리버</b><span>공용 1장</span></div><div><b>쇼다운</b><span>패 공개</span></div></div>
     <h4>규칙 요약</h4>
