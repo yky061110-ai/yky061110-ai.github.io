@@ -329,6 +329,9 @@ body.wide-table .res-cards{--cw:30px;width:68px}
 .res-lose{color:var(--muted)}
 .res-fold{color:var(--muted);font-size:12px}
 .res-note{margin:6px 0 0;font-size:11px;color:var(--muted)}
+.adv-board{margin:0;font-size:13px;line-height:1.45;word-break:keep-all;color:var(--ink);background:rgba(143,163,160,.12);border-radius:8px;padding:8px 10px}
+.adv-board .ct{font-weight:700}
+.adv-board .ct.red{color:#e5534b}
 .huse{font-size:12px;line-height:1.35;word-break:keep-all;color:var(--ink);margin:2px 0}
 .huse b{font-size:11px;font-weight:700;color:var(--bg);background:var(--brass);border-radius:4px;padding:0 5px;margin-right:4px}
 .hand-board{font-style:normal;font-family:var(--f-body,inherit);font-size:13px;font-weight:700;color:var(--bg);background:#8fa3a0;border-radius:5px;padding:1px 6px;vertical-align:middle}
@@ -882,7 +885,32 @@ function handUse(hole, board){
   if (board.length===5){ const bb = best(board); if (bb && bb.score===b.score){ mineCore = []; kick = []; } } // 바닥 5장 그대로가 최고
   return {b, name: handName(b), mineCore, kick, shared: mineCore.length===0};
 }
+// 내 카드가 실제로 들어가서 만들어지는 가장 좋은 족보 (바닥 카드만으로 된 족보는 제외)
+function myHand(hole, board){
+  const all = hole.concat(board); let top = null;
+  for (const ix of combos(all.length)){
+    const five = ix.map(i=>all[i]);
+    if (!five.some(c=>hole.includes(c))) continue;
+    const h = eval5(five);
+    if (top && h.score<=top.score) continue;
+    const cnt = {}; five.forEach(c=>{ cnt[c[0]] = (cnt[c[0]]||0) + 1; });
+    let core;
+    if ([1,2,3,6,7].includes(h.cat)) core = five.filter(c=>cnt[c[0]]>=2);
+    else if (h.cat===0) core = [five.slice().sort((x,y)=>rv(y)-rv(x))[0]];
+    else core = five;
+    if (!core.some(c=>hole.includes(c))) continue;
+    top = h; top.cards = five;
+  }
+  return top;
+}
 function cardTxt(c){ const r = c[0]==='T' ? '10' : c[0]; const sy = {s:'♠',h:'♥',d:'♦',c:'♣'}[c[1]]; return `<span class="ct ${c[1]==='h'||c[1]==='d'?'red':''}">${r}${sy}</span>`; }
+// 추천플레이: 바닥 카드만으로 된 족보 안내
+function boardNote(hole, board){
+  const u = handUse(hole, board); if (!u || !u.shared) return '';
+  const k = u.kick.length ? `실제 승부는 이 ${esc(u.name)}에 내 ${u.kick.map(cardTxt).join(' ')} 키커를 더해서 겨뤄요` : '내 카드는 승부에 안 쓰여서 비기기 쉬워요';
+  const ga = ((u.name.charCodeAt(u.name.length-1)-0xAC00)%28) ? '이' : '가';
+  return `<p class="adv-board">📋 바닥 카드만으로 ${esc(u.name)}${ga} 돼 있어요. 이건 모두가 같이 쓰는 패라 ${k}.</p>`;
+}
 function handUseHTML(u){
   if (!u) return '';
   if (u.shared){
@@ -1422,7 +1450,7 @@ function adviceHTML(s, mi){
   return `<div class="advice open">${head}
     <div class="adv-body">
       <div class="adv-rec ${a.tone}"><span class="adv-label">${mine ? '추천' : '내 차례가 오면'}</span><b>${a.act}</b></div>
-      <p class="adv-why">${a.why}</p>
+      <p class="adv-why">${a.why}</p>${boardNote(p.cards, s.board)}
       <div class="adv-bar" aria-label="이길 확률 ${eqW}%"><i style="width:${eqW}%"></i>${a.call>0 ? `<em style="left:${needL}%" title="필요한 승률"></em>` : ''}</div>
       <div class="adv-legend"><span>이길 확률 <b>${a.pct(a.eq)}</b> (상대 ${a.opp}명)</span>${a.call>0 ? `<span><em></em>콜에 필요한 승률 <b>${a.pct(a.need)}</b></span>` : ''}</div>
       ${imp}${outs}
@@ -1442,8 +1470,7 @@ function resultHTML(s, mi){
   const winHands = new Set(rows.filter(r=>r.w).map(r=>r.i));
   const body = rows.map(r=>{
     const res = r.w ? `<b class="res-win num">+${fmt(r.w)}</b>` : r.p.folded ? `<span class="res-fold">폴드</span>` : `<span class="res-lose">패배</span>`;
-    const u = !r.p.folded && s.board.length>=3 ? handUse(r.p.cards, s.board) : null;
-    const hn = r.p.hn ? esc(r.p.hn) + (u && u.shared ? ' <small class="res-board">바닥</small>' : '') : '';
+    const hn = r.p.hn ? esc(r.p.hn) : '';
     return `<tr class="${r.w?'w':''}${r.p.folded?' f':''}${r.i===mi?' me':''}"><td class="res-nm"><span data-nm="${r.i}"></span>${r.i===mi?' <small>(나)</small>':''}</td><td class="res-cards">${r.p.cards.map(c=>cardHTML(c,{mini:true, dim:r.p.folded})).join('')}</td><td class="res-hn">${hn}</td><td class="res-out">${res}</td></tr>`;
   }).join('');
   const note = s.uncontested ? '<p class="res-note">모두 폴드해서 끝난 판이에요. 공개된 카드는 참고용이에요.</p>' : '';
@@ -1457,16 +1484,15 @@ function renderDock(s, mi, now){
   const p = s.seats[mi];
   const inPlay = p.inHand && !p.folded;
   const b = inPlay && s.board.length>=3 ? best(p.cards.concat(s.board)) : null;
-  const use = b ? handUse(p.cards, s.board) : null;
   let handTxt = '';
   if (p.inHand && p.cards.length){
-    if (b) handTxt = handName(b);
+    if (b){ const mh = myHand(p.cards, s.board); handTxt = mh ? handName(mh) : HAND[0]; }
     else if (p.cards[0][0]===p.cards[1][0]) handTxt = '포켓 페어';
     else handTxt = p.cards[0][1]===p.cards[1][1] ? '수딧' : '오프수트';
     if (p.folded) handTxt = '폴드함';
   }
   const holes = p.inHand && p.cards.length ? p.cards.map(c=>cardHTML(c,{animate:true,key:s.handNo+'m', dim:p.folded})).join('') : cardHTML(null)+cardHTML(null);
-  const mine = `<div class="mine"><div class="hole">${holes}</div><div class="info"><span class="hand">${use && use.shared ? '<em class="hand-board">바닥</em>' : ''}${esc(handTxt || (s.stage==='idle'?'대기 중':'이번 핸드 관전'))}${HAND_INFO[handTxt] ? `<button class="info-btn${ui.infoOpen?' on':''}" data-a="info" aria-label="${handTxt} 뜻 보기" aria-expanded="${!!ui.infoOpen}">i</button>` : ''}</span>${handUseHTML(use)}${p.inHand && !p.folded ? handRankHTML(handTxt) : ''}<span class="sub">칩 <b class="num">${fmt(p.chips)}</b>${p.bet?` · 이번 라운드 베팅 <span class="num">${fmt(p.bet)}</span>`:''}</span></div></div>`;
+  const mine = `<div class="mine"><div class="hole">${holes}</div><div class="info"><span class="hand">${esc(handTxt || (s.stage==='idle'?'대기 중':'이번 핸드 관전'))}${HAND_INFO[handTxt] ? `<button class="info-btn${ui.infoOpen?' on':''}" data-a="info" aria-label="${handTxt} 뜻 보기" aria-expanded="${!!ui.infoOpen}">i</button>` : ''}</span>${p.inHand && !p.folded ? handRankHTML(handTxt) : ''}<span class="sub">칩 <b class="num">${fmt(p.chips)}</b>${p.bet?` · 이번 라운드 베팅 <span class="num">${fmt(p.bet)}</span>`:''}</span></div></div>`;
 
   let controls = '';
   if (BETTING.has(s.stage) && s.toAct===mi){
