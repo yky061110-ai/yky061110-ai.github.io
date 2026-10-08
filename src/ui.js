@@ -5,9 +5,9 @@ const esc = t => String(t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'
 let view = 'lobby', botCount = 3;
 let hostSeats = Math.max(2, Math.min(9, parseInt(store('holdem.seats')) || 6));
 const LEVELS = {
-  easy:   {name:'이지',  desc:'자주 따라오고 블러핑 없음'},
-  normal: {name:'노멀',  desc:'무난한 실력'},
-  hard:   {name:'하드',  desc:'계산 정확, 블러핑도 함'},
+  easy:   {name:'이지', tag:'초보', play:'약 60%', lines:['웬만한 패는 다 따라와요 (레이즈는 거의 안 함)','진짜 좋은 패일 때만 작게 베팅, 블러핑 없음','큰 베팅·올인엔 쉽게 포기해요']},
+  normal: {name:'노멀', tag:'정석', play:'약 20%', lines:['자리별 좋은 시작 패만 골라서 플레이','좋은 패는 베팅, 팟 오즈대로 콜·폴드','블러핑은 가끔, 무리한 올인 없음']},
+  hard:   {name:'하드', tag:'프로 스타일', play:'약 27%', lines:['자리별 시작 패 표, 칩이 적으면 올인/폴드','내 액션으로 패를 읽고 보드에 맞춰 베팅','세미블러핑·리버 블러핑, 잘 접으면 더 압박']},
 };
 let botLevel = LEVELS[store('holdem.level')] ? store('holdem.level') : 'normal';
 let chipChoice = CHIP_OPTIONS[store('holdem.chips')] ? +store('holdem.chips') : 10000;
@@ -418,8 +418,9 @@ function renderLobby(){
       <h3>컴퓨터와 대결</h3>
       <div class="stepper"><button data-a="bots-" aria-label="상대 줄이기">−</button><span class="num">${botCount}</span><span>명의 상대</span><button data-a="bots+" aria-label="상대 늘리기">+</button></div>
       <div class="levels" role="radiogroup" aria-label="난이도">
-        ${Object.entries(LEVELS).map(([k,v])=>`<button role="radio" aria-checked="${botLevel===k}" class="level${botLevel===k?' on':''}" data-a="level" data-v="${k}"><b>${v.name}</b></button>`).join('')}
+        ${Object.entries(LEVELS).map(([k,v])=>`<button role="radio" aria-checked="${botLevel===k}" class="level${botLevel===k?' on':''}" data-a="level" data-v="${k}"><b>${v.name}</b><small>${v.tag}</small></button>`).join('')}
       </div>
+      <div class="level-desc"><div class="ld-head"><b>${LEVELS[botLevel].name} · ${LEVELS[botLevel].tag}</b><span>참여하는 판 ${LEVELS[botLevel].play}</span></div><ul>${LEVELS[botLevel].lines.map(t=>`<li>${t}</li>`).join('')}</ul></div>
       <button class="primary" data-a="start-local">게임 시작</button>
     </div>
     <div class="mode">
@@ -935,7 +936,7 @@ function startLocal(){
   let s = emptyTable(6, chipChoice);
   s.level = botLevel;
   s.seats[0] = makeSeat('me', {name:'나', chips:s.startChips});
-  BOT_SEATS[botCount].forEach((seat,k)=>{ s.seats[seat] = makeSeat('bot'+k, {name:BOT_NAMES[k], chips:s.startChips, bot:true, per:{agg:.25+Math.random()*.55, loose:-.03+Math.random()*.1}}); });
+  BOT_SEATS[botCount].forEach((seat,k)=>{ s.seats[seat] = makeSeat('bot'+k, {name:BOT_NAMES[k], chips:s.startChips, bot:true, per:{style: Math.random()<.35 ? 'lag' : 'tag'}}); });
   view = 'local'; ui.seenCards = new Set(); ui.trays = {};
   localState = startHand(s, Date.now());
   afterLocal();
