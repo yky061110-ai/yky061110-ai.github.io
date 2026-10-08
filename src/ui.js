@@ -65,17 +65,37 @@ function courtHalf(r, s, ink){
     <circle cx="47.3" cy="40" r=".9" fill="#2b2b2b"/><circle cx="52.7" cy="40" r=".9" fill="#2b2b2b"/>
     ${beard}${crown}${item}${pip(s, 27, 29, 9)}`;
 }
+// 스페이드 A: 전통 스타일 장식 (직접 그린 그림)
+function aceOfSpadesArt(){
+  const petals = Array.from({length:8}, (_,i)=>`<ellipse cx="50" cy="54" rx="1.6" ry="4.6" transform="rotate(${i*45} 50 59)" fill="#1c2733"/>`).join('');
+  const leaves = side => Array.from({length:5}, (_,i)=>{ const t = i/4, x = 50 + side*(13 + t*12), y = 118 - t*15, a = side*(-40 - t*25); return `<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="1.6" ry="3.8" transform="rotate(${a.toFixed(0)} ${x.toFixed(1)} ${y.toFixed(1)})" fill="#1c2733"/>`; }).join('');
+  return `
+    <path d="M35 118 Q50 126 65 118" stroke="#1c2733" stroke-width="1.1" fill="none"/>
+    <path d="M50 118 C47 110 33 111 29 101" stroke="#1c2733" stroke-width="1" fill="none"/>
+    <path d="M50 118 C53 110 67 111 71 101" stroke="#1c2733" stroke-width="1" fill="none"/>
+    ${leaves(-1)}${leaves(1)}
+    <use href="#suit-s" x="12" y="20" width="76" height="76"/>
+    <use href="#suit-s-line" x="18" y="26" width="64" height="64"/>
+    <path d="M40 97 C34 103 27 101 28.5 95.5 C30 91 36 93 34 97" stroke="#1c2733" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+    <path d="M60 97 C66 103 73 101 71.5 95.5 C70 91 64 93 66 97" stroke="#1c2733" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+    <circle cx="50" cy="59" r="11.5" fill="#ffffff"/><circle cx="50" cy="59" r="10" fill="none" stroke="#1c2733" stroke-width=".8"/>
+    ${petals}<circle cx="50" cy="59" r="2.8" fill="#ffffff" stroke="#1c2733" stroke-width=".8"/>
+    <path d="M50 13 L52 16 L50 19 L48 16 Z" fill="#1c2733"/><circle cx="44.5" cy="16" r=".9" fill="#1c2733"/><circle cx="55.5" cy="16" r=".9" fill="#1c2733"/>`;
+}
+const COURT_IMG = r => 'JQK'.includes(r);
 function cardSVG(c, mini){
   const r = c[0], s = c[1], red = s==='h' || s==='d';
   const ink = red ? '#c3312c' : '#1c2733';
   if (mini){
-    return `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="10" fill="#fdfbf5" stroke="#bdb6a4" stroke-width="2"/>
-      <text x="50" y="62" text-anchor="middle" font-size="${r==='T'?50:58}" font-weight="700" fill="${ink}" font-family="Georgia,'Times New Roman',serif">${RANK_TXT(r)}</text>
+    return `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="10" fill="#ffffff" stroke="#bdb6a4" stroke-width="2"/>
+      <text x="50" y="62" text-anchor="middle" font-size="${r==='T'?50:58}" font-weight="700" fill="${ink}" font-family="Arial,Helvetica,'Liberation Sans',sans-serif">${RANK_TXT(r)}</text>
       ${pip(s, 50, 98, 52)}</svg>`;
   }
-  const idx = `<text x="12" y="25" text-anchor="middle" font-size="${r==='T'?17:21}" font-weight="700" fill="${ink}" font-family="Georgia,'Times New Roman',serif" letter-spacing="${r==='T'?-1.5:0}">${RANK_TXT(r)}</text>${pip(s, 12, 36, 12)}`;
+  const idx = `<text x="12" y="25" text-anchor="middle" font-size="${r==='T'?17:21}" font-weight="600" fill="${ink}" font-family="Arial,Helvetica,'Liberation Sans',sans-serif" letter-spacing="${r==='T'?-1.8:0}">${RANK_TXT(r)}</text>${pip(s, 12, 36, 12)}`;
   let middle;
-  if (PIPS[r]) {
+  if (c==='As') {
+    middle = aceOfSpadesArt();
+  } else if (PIPS[r]) {
     const big = r==='A' ? (s==='s' ? 46 : 34) : 19;
     middle = PIPS[r].map(([x,y])=>pip(s, x, y, big, y>70)).join('');
   } else {
@@ -84,10 +104,10 @@ function cardSVG(c, mini){
       <g clip-path="url(#cf-${c})">${courtHalf(r, s, ink)}<g transform="rotate(180 50 70)">${courtHalf(r, s, ink)}</g></g>
       <path d="M22 70 L78 70" stroke="${ink}" stroke-width=".8" opacity=".5"/>`;
   }
-  return `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="8" fill="#fdfbf5" stroke="#bdb6a4" stroke-width="1.5"/>
+  return `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="8" fill="#ffffff" stroke="#bdb6a4" stroke-width="1.5"/>
     ${middle}${idx}<g transform="rotate(180 50 70)">${idx}</g></svg>`;
 }
-const BACK_SVG = `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="8" fill="#fdfbf5" stroke="#bdb6a4" stroke-width="1.5"/>
+const BACK_SVG = `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="8" fill="#ffffff" stroke="#bdb6a4" stroke-width="1.5"/>
   <rect x="7" y="7" width="86" height="126" rx="5" fill="url(#card-back)"/><rect x="7" y="7" width="86" height="126" rx="5" fill="none" stroke="#e9dcc0" stroke-width="1.2"/>
   <rect x="13" y="13" width="74" height="114" rx="3" fill="none" stroke="#e9dcc0" stroke-width=".8" opacity=".7"/></svg>`;
 /* ---------- 족보 용어 설명 ---------- */
@@ -188,7 +208,8 @@ function cardHTML(c, opts={}){
   const key = (opts.key||'') + c;
   const fresh = opts.animate && !ui.seenCards.has(key); if (opts.animate) ui.seenCards.add(key);
   const label = `${RANK_TXT(c[0])} ${({s:'스페이드',h:'하트',d:'다이아',c:'클로버'})[c[1]]}`;
-  return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}">${cardSVG(c, opts.mini)}</div>`;
+  const face = !opts.mini && COURT_IMG(c[0]) ? `<img class="face" src="cards/${c[0]}${c[1].toUpperCase()}.webp" alt="" draggable="false" onerror="this.remove()">` : '';
+  return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}">${cardSVG(c, opts.mini)}${face}</div>`;
 }
 
 /* ---------- 카지노 칩 ---------- */

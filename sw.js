@@ -1,6 +1,7 @@
 // 홀덤 테이블 서비스 워커: 오프라인에서도 컴퓨터 대결이 열리도록 캐시
-const CACHE = 'holdem-v15';
-const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
+const CACHE = 'holdem-v16';
+const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png',
+  ...['J','Q','K'].flatMap(r=>['S','H','D','C'].map(s=>`./cards/${r}${s}.webp`))];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

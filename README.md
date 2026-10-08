@@ -38,3 +38,9 @@
 | `index.html` | 게임 전체 |
 | `manifest.webmanifest`, `sw.js`, `icon-*.png` | 홈 화면 설치(PWA) |
 | `src/ui.js` | 화면·온라인 코드 원본 (index.html에 합쳐져 있음) |
+| `cards/*.webp` | J·Q·K 그림 카드 |
+
+## 그림 출처
+
+- J·Q·K 그림: [Vector Playing Cards](https://github.com/notpeter/vector-playing-cards) (원작자 Byron Knoll, 퍼블릭 도메인). 웹용으로 크기를 줄여 WebP로 변환함
+- 숫자 카드 문양과 스페이드 A 장식은 이 앱에서 직접 그림
