@@ -3,19 +3,19 @@
    브라우저 콘솔에서 renderMusic(44100) 을 실행하면 AudioBuffer가 만들어지고 (buf.loopStart ~ buf.loopEnd 구간이 반복 구간),
    이것을 WAV로 저장한 뒤 MP3(96kbps)로 변환한 것이 audio/lounge.mp3 입니다.
    휴대폰에서 매번 합성하면 수십 초가 걸려서, 미리 만들어 둔 파일을 씁니다. */
-async function renderMusic(rate, bars, solo, ending){
+async function renderMusic(rate, bars, solo, ending, V){
   const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   // 템포: 1~16마디 96 → 17~20마디 점점 빨라짐 → 21~28마디 114로 달림 → 29~32마디 다시 96으로 (반복 이음매 자연스럽게)
   const BARS = bars || 32;
-  const bpmOf = bar => bar < 16 ? 96 : bar < 20 ? 96 + (bar - 15) * 4.5 : bar < 28 ? 114 : 114 - (bar - 27) * 4.5;
-  const IB = .42, PRE = 10 * IB, TAIL = 2; // 인트로: 0.42초 간격 히트 8번 + 2박 숨 고르기, 끝 잔향은 반복 시작 부분에 겹쳐 넣음
+  const bpmOf = V ? V.bpmOf : bar => bar < 16 ? 96 : bar < 20 ? 96 + (bar - 15) * 4.5 : bar < 28 ? 114 : 114 - (bar - 27) * 4.5;
+  const IB = .42, PRE = V ? .05 : 10 * IB, TAIL = 2; // 인트로: 0.42초 간격 히트 8번 + 2박 숨 고르기, 끝 잔향은 반복 시작 부분에 겹쳐 넣음
   const beatOf = [], startOf = [PRE];
   for (let b = 0; b < BARS; b++){ beatOf.push(60 / bpmOf(b)); startOf.push(startOf[b] + 4 * beatOf[b]); }
   const LEN = startOf[BARS];
   const sr = Math.min(rate || 44100, 44100);
-  const END_LEN = ending ? 2 * 4 * 60 / 96 + 3 : 0;
+  const END_LEN = ending ? 2 * 4 * 60 / bpmOf(BARS - 1) + 3 : 0;
   const ctx = new OAC(2, Math.ceil((LEN + TAIL + END_LEN) * sr), sr);
-  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  let seed = V ? V.seed : 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const hz = m => 440 * Math.pow(2, (m - 69) / 12);
   // 리버브 (작은 재즈바 느낌)
   const rev = ctx.createConvolver(); const irLen = Math.floor(sr * 1.6); const ir = ctx.createBuffer(2, irLen, sr);
@@ -26,7 +26,7 @@ async function renderMusic(rate, bars, solo, ending){
   const wet = ctx.createGain(); wet.gain.value = .22; rev.connect(wet); wet.connect(comp);
   const bus = (g, verb, pan) => { const n = ctx.createGain(); n.gain.value = g; let o = n; if (ctx.createStereoPanner && pan){ const p = ctx.createStereoPanner(); p.pan.value = pan; n.connect(p); o = p; } o.connect(dry); if (verb){ const s = ctx.createGain(); s.gain.value = verb; o.connect(s); s.connect(rev); } return n; };
   const epBus = bus(.16, .8, -.15), bassBus = bus(.16, .15, 0), vibBus = bus(.4, 1, .2), drumBus = bus(1.6, .3, .1), padBus = bus(.05, 1, 0);
-  const brassBus = bus(.2, .6, 0), bellBus = bus(.22, .9, .1);
+  const brassBus = bus(.2, .6, 0), bellBus = bus(.22, .9, .1), hornBus = bus(.3, .9, .15);
   if (solo) [['ep',epBus],['bass',bassBus],['vib',vibBus],['drum',drumBus],['pad',padBus]].forEach(([n,g])=>{ if (n!==solo) g.gain.value = 0; });
   const noise = ctx.createBuffer(1, sr, sr); { const d = noise.getChannelData(0); for (let i = 0; i < sr; i++) d[i] = Math.random() * 2 - 1; }
   const env = (g, t, a, peak, dec, end) => { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.setTargetAtTime(0, t + a, dec); if (end) { g.gain.setTargetAtTime(0, end, .05); } };
@@ -40,6 +40,7 @@ async function renderMusic(rate, bars, solo, ending){
     [34,'M',[50,53,57,60]], [34,'M',[50,55,57,62]], [31,'m',[53,57,58,62]], [36,'7',[52,55,58,62]],
     [40,'h',[50,55,58,64]], [33,'7',[55,58,61,64]], [38,'m',[53,57,60,64]], [33,'7',[55,58,61,65]],
   ];
+  if (V) PROG.splice(0, PROG.length, ...V.prog);
   // 멜로디 (비브라폰) [마디, 박, 음, 길이(박)]
   const MEL = [
     [0,0,69,1.5],[0,1.67,74,.33],[0,2,77,1],[0,3,76,1],[1,0,74,3],
@@ -51,8 +52,10 @@ async function renderMusic(rate, bars, solo, ending){
     [12,0,79,1],[12,1,77,.67],[12,1.67,74,.33],[12,2,70,2],[13,0,73,1],[13,1,70,1],[13,2,67,1],[13,3,64,1],
     [14,0,74,3.5],[15,1,73,.67],[15,1.67,76,.33],[15,2,79,1],[15,3,82,1],
   ];
+  if (V) MEL.splice(0, MEL.length, ...V.mel);
   // 두 번째 반복은 긴장감 있게: 멜로디는 쉬고 도미넌트 마디에서만 짧은 비브라폰 필인
   const FILL = [[3,2,76,.67],[3,2.67,73,.33],[3,3,70,1],[7,2,79,.67],[7,2.67,77,.33],[7,3,73,1],[11,2.67,82,.33],[11,3,79,1],[15,1,76,.67],[15,1.67,73,.33],[15,2,70,1],[15,3,69,1]];
+  if (V) FILL.splice(0, FILL.length, ...V.fill);
   const at = (bar, beat) => startOf[bar] + beat * beatOf[bar];
 
   const ep = (m, t, dur, vel) => { // 로즈 피아노 같은 FM 음색
@@ -63,11 +66,11 @@ async function renderMusic(rate, bars, solo, ending){
     osc('sine', f, t, stop, mg); mg.connect(car.frequency);
     const tg = ctx.createGain(); env(tg, t, .002, vel * .18, .06); tg.connect(epBus); osc('sine', f * 7.1, t, t + .4, tg);
   };
-  const bass = (m, t, dur, vel) => {
+  const bass = (m, t, dur, vel, rel = .04) => {
     const f = hz(m), end = t + dur * .92;
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(1100, t); lp.frequency.setTargetAtTime(420, t, .08); lp.connect(bassBus);
-    const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel, t + .012); g.gain.setTargetAtTime(vel * .55, t + .012, .12); g.gain.setTargetAtTime(0, end, .04); g.connect(lp);
-    osc('triangle', f, t, end + .3, g); const g2 = ctx.createGain(); g2.gain.value = .7; g2.connect(g); osc('sine', f, t, end + .3, g2);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel, t + .012); g.gain.setTargetAtTime(vel * .55, t + .012, .12); g.gain.setTargetAtTime(0, end, rel); g.connect(lp);
+    osc('triangle', f, t, end + rel * 7 + .1, g); const g2 = ctx.createGain(); g2.gain.value = .7; g2.connect(g); osc('sine', f, t, end + rel * 7 + .1, g2);
   };
   const vib = (m, t, dur, vel) => {
     const f = hz(m), stop = t + dur + 1.8;
@@ -76,6 +79,14 @@ async function renderMusic(rate, bars, solo, ending){
     g.connect(trem); trem.connect(vibBus);
     osc('sine', f, t, stop, g); const h = ctx.createGain(); env(h, t, .002, vel * .35, .08); h.connect(vibBus); osc('sine', f * 4, t, t + .5, h);
   };
+  const horn = (m, t, dur, vel) => { // 약음기 낀 트럼펫 (부드럽고 어두운 소리)
+    const f = hz(m), end = t + dur, stop = end + .4;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = .8; lp.frequency.setValueAtTime(600, t); lp.frequency.linearRampToValueAtTime(1500, t + .1); lp.frequency.setTargetAtTime(1000, t + .1, .35); lp.connect(hornBus);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel * .42, t + .06); g.gain.setTargetAtTime(vel * .32, t + .06, .5); g.gain.setTargetAtTime(0, end - .02, .07); g.connect(lp);
+    const o = osc('sawtooth', f, t, stop, g); osc('triangle', f * 1.003, t, stop, g);
+    const vd = ctx.createGain(); vd.gain.setValueAtTime(0, t); vd.gain.linearRampToValueAtTime(f * .005, t + .45); vd.connect(o.frequency); osc('sine', 5, t, stop, vd);
+  };
+  const lead = (k, m, t, dur, vel) => (V && V.lead && V.lead[k] === 'horn') ? horn(m, t, dur, vel) : vib(m, t, dur, vel);
   const ride = (t, acc) => { noiseHit(t, .9, 'highpass', 6000, .5, .07 * acc, .22, drumBus); noiseHit(t, .05, 'bandpass', 4200, 2, .05 * acc, .012, drumBus); };
   const hat = t => noiseHit(t, .1, 'highpass', 7500, .7, .06, .025, drumBus);
   const brush = (t, v) => { const s = ctx.createBufferSource(); s.buffer = noise; const fl = ctx.createBiquadFilter(); fl.type = 'bandpass'; fl.frequency.setValueAtTime(2200, t); fl.frequency.linearRampToValueAtTime(3800, t + .2); fl.Q.value = .6; const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .03); g.gain.setTargetAtTime(0, t + .05, .07); s.connect(fl); fl.connect(g); g.connect(drumBus); s.start(t, rnd() * .5, .5); };
@@ -85,7 +96,7 @@ async function renderMusic(rate, bars, solo, ending){
   const COMP = [[[0,.9,.85],[1+SW,.3,.7]], [[SW,.3,.75],[2,1.2,.8]], [[0,.5,.8],[2+SW,1,.75]], [[1+SW,.3,.7],[3,.6,.75]], [[0,2,.85]]];
   for (let bar = 0; bar < BARS; bar++){
     const [root, q, voic] = PROG[bar % 16], next = PROG[(bar + 1) % 16][0];
-    const B = beatOf[bar], BAR = 4 * B, fast = bar >= 20 && bar < 28;
+    const B = beatOf[bar], BAR = 4 * B, fast = bar >= 20 && bar < 28 && (!V || V.drive);
     const T = at(bar, 0), second = bar >= 16;
     // 일렉 피아노 컴핑
     const pat = COMP[Math.floor(rnd() * COMP.length)];
@@ -105,9 +116,9 @@ async function renderMusic(rate, bars, solo, ending){
     // 낮게 깔리는 긴장감 패드 (마지막 4마디마다)
     if (bar % 16 >= 12){ const g = ctx.createGain(); env(g, T, .8, 1, 1.4, T + BAR - .1); const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; g.connect(lp); lp.connect(padBus); osc('sawtooth', hz(root + 12), T, T + BAR + .6, g); osc('sawtooth', hz(root + 12) * 1.004, T, T + BAR + .6, g); }
   }
-  MEL.forEach(([bar, bt, m, d]) => { if (bar < BARS) vib(m, at(bar, bt), d * beatOf[bar], .55); });
+  MEL.forEach(([bar, bt, m, d]) => { if (bar < BARS) lead(0, m, at(bar, bt), d * beatOf[bar], .55); });
   // 빨라지는 구간(21~28마디)에서 주제 멜로디가 다시 나옴
-  MEL.forEach(([bar, bt, m, d]) => { const b2 = bar + 20; if (bar < 8 && b2 < BARS) vib(m, at(b2, bt), d * beatOf[b2], .6); });
+  MEL.forEach(([bar, bt, m, d]) => { const b2 = bar + 20; if (bar < 8 && b2 < BARS) lead(1, m, at(b2, bt), d * beatOf[b2], .6); });
   FILL.forEach(([bar, bt, m, d]) => { const b2 = bar + 16; if ((bar === 3 || bar === 15) && b2 < BARS) vib(m, at(b2, bt), d * beatOf[b2], .45); });
 
   // ---------- 인트로: 벨 '띵~' + 스톱타임 리프 ----------
@@ -123,7 +134,7 @@ async function renderMusic(rate, bars, solo, ending){
   };
   const snare = (t, v) => { noiseHit(t, .25, 'bandpass', 1900, .8, v, .07, drumBus); const g = ctx.createGain(); env(g, t, .002, v * .5, .04); g.connect(drumBus); osc('triangle', 190, t, t + .3, g); };
   const crash = (t, v) => noiseHit(t, 1, 'highpass', 4500, .5, v, .45, drumBus);
-  { const Bp = IB;
+  if (!V){ const Bp = IB;
     bell(.02, 1396.9, .9);                       // 시작 '띵~'
     crash(.02, .04); kick(.02, .45);
     // 리프: D → D(옥타브 위) → A → A | B♭ → A → G# → A  (마지막에 스네어 몰아치며 본곡으로)
@@ -138,8 +149,8 @@ async function renderMusic(rate, bars, solo, ending){
 
   // 메들리용 끝맺음: D단조 화음 + 벨 '띵'
   if (ending){
-    const T = LEN, B = 60 / 96;
-    [50, 53, 57, 60, 64].forEach(m => ep(m, T, 8 * B, .7)); bass(38, T, 6 * B, .95); vib(74, T, 8 * B, .5);
+    const T = LEN, B = 60 / bpmOf(BARS - 1);
+    const tn = V ? V.tonic : 38; [12, 15, 19, 22, 26].map(x => tn + x).forEach(m => ep(m, T, 8 * B, .6)); bass(tn, T, 6 * B, .95, .8); vib(tn + 36, T, 8 * B, .45);
     kick(T, .45); crash(T, .05); bell(T, 1396.9, .6);
   }
   const raw = await ctx.startRendering();

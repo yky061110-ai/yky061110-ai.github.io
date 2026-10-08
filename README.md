@@ -51,8 +51,8 @@
 | `manifest.webmanifest`, `sw.js`, `icon-*.png` | 홈 화면 설치(PWA) |
 | `src/ui.js` | 화면·온라인 코드 원본 (index.html에 합쳐져 있음) |
 | `cards/*.webp` | J·Q·K 그림 카드 |
-| `audio/lounge-intro.mp3`, `audio/lounge-loop.mp3` | 배경음악: 인트로 → '라운지 블러프' 반복 (이 앱용 창작곡) |
-| `tools/music-compose.js` | 배경음악 작곡·합성 코드 |
+| `audio/lounge-intro.mp3`, `audio/song1~6.mp3` | 배경음악: 인트로 → 같은 계열 라운지 재즈 6곡 이어서 반복 (이 앱용 창작곡) |
+| `tools/music-compose.js`, `tools/music-variants.js` | 배경음악 작곡·합성 코드 |
 
 ## 그림 출처
 
