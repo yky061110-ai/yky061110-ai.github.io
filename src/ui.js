@@ -1,6 +1,6 @@
 /* ================= 화면 ================= */
 const app = document.getElementById('app');
-const fmt = n => Number(n||0).toLocaleString('ko-KR');
+const fmt = n => '$' + Number(n||0).toLocaleString('en-US');   // 칩 금액은 달러로 표시
 const esc = t => String(t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let view = 'lobby', botCount = 3;
 let hostSeats = Math.max(2, Math.min(9, parseInt(store('holdem.seats')) || 6));
@@ -25,13 +25,113 @@ const me = {
 };
 const cleanName = n => String(n||'').replace(/\s+/g,' ').trim().slice(0,10) || '플레이어';
 
+/* ---------- 카드 그림 (SVG, 100×140 기준) ---------- */
+// 숫자 카드 문양 위치 (아래쪽 절반은 실제 카드처럼 거꾸로)
+const PIPS = {
+  A: [[50,70]],
+  2: [[50,30],[50,110]],
+  3: [[50,30],[50,70],[50,110]],
+  4: [[30,30],[70,30],[30,110],[70,110]],
+  5: [[30,30],[70,30],[50,70],[30,110],[70,110]],
+  6: [[30,30],[70,30],[30,70],[70,70],[30,110],[70,110]],
+  7: [[30,30],[70,30],[50,50],[30,70],[70,70],[30,110],[70,110]],
+  8: [[30,30],[70,30],[50,50],[30,70],[70,70],[50,90],[30,110],[70,110]],
+  9: [[30,28],[70,28],[30,56],[70,56],[50,70],[30,84],[70,84],[30,112],[70,112]],
+  T: [[30,28],[70,28],[50,42],[30,56],[70,56],[30,84],[70,84],[50,98],[30,112],[70,112]],
+};
+const RANK_TXT = r => r==='T' ? '10' : r;
+function pip(s, x, y, size, flip){
+  const h = size/2;
+  return `<use href="#suit-${s}" x="${x-h}" y="${y-h}" width="${size}" height="${size}"${flip?` transform="rotate(180 ${x} ${y})"`:''}/>`;
+}
+// 그림 카드 인물 (위쪽 절반을 그리고 180도 돌려서 아래쪽에 한 번 더)
+function courtHalf(r, s, ink){
+  const crown = r==='K'
+    ? `<path d="M39 33 L39 23 L44 28 L50 20 L56 28 L61 23 L61 33 Z" fill="#e2b13c" stroke="#7a5a12" stroke-width="1"/><circle cx="50" cy="20" r="2" fill="#c3312c"/>`
+    : r==='Q'
+    ? `<path d="M40 33 L41 25 L45.5 29 L50 23 L54.5 29 L59 25 L60 33 Z" fill="#e2b13c" stroke="#7a5a12" stroke-width="1"/><circle cx="41" cy="24.5" r="1.8" fill="#fff"/><circle cx="50" cy="22.5" r="1.8" fill="#fff"/><circle cx="59" cy="24.5" r="1.8" fill="#fff"/>`
+    : `<path d="M39 34 Q50 19 61 34 Z" fill="${ink}" stroke="#2b2b2b" stroke-width="1"/><path d="M59 30 Q67 20 64 14" stroke="#e2b13c" stroke-width="2.4" fill="none" stroke-linecap="round"/>`;
+  const hair = r==='Q' ? `<path d="M40 36 Q38 48 42 54 L44 40 Z M60 36 Q62 48 58 54 L56 40 Z" fill="#7a4a1c"/>` : '';
+  const beard = r==='K' ? `<path d="M44 46 Q50 56 56 46 Q53 49 50 49 Q47 49 44 46 Z" fill="#d9d2c3" stroke="#8a7f6a" stroke-width=".6"/>` : '';
+  const item = r==='K'
+    ? `<path d="M68 70 L68 36" stroke="#9aa4ad" stroke-width="2.4"/><path d="M64 40 L72 40" stroke="#7a5a12" stroke-width="2.4"/>`
+    : r==='Q'
+    ? `<path d="M32 66 L33 44" stroke="#2f6b34" stroke-width="1.6"/><circle cx="33" cy="42" r="3.6" fill="#c3312c"/><circle cx="33" cy="42" r="1.4" fill="#e2b13c"/>`
+    : `<path d="M31 70 L31 40" stroke="#7a5a12" stroke-width="2"/><path d="M28 42 L31 34 L34 42 Z" fill="#9aa4ad"/>`;
+  return `<path d="M30 70 L33 56 Q36 51 44 50 L56 50 Q64 51 67 56 L70 70 Z" fill="${ink}" stroke="#2b2b2b" stroke-width="1"/>
+    <path d="M44 50 L50 62 L56 50" fill="#e2b13c" stroke="#7a5a12" stroke-width=".8"/>
+    <path d="M36 70 L38 60 M64 70 L62 60" stroke="#e2b13c" stroke-width="1.6"/>
+    ${hair}<circle cx="50" cy="41" r="7.5" fill="#f3d9b5" stroke="#2b2b2b" stroke-width="1"/>
+    <circle cx="47.3" cy="40" r=".9" fill="#2b2b2b"/><circle cx="52.7" cy="40" r=".9" fill="#2b2b2b"/>
+    ${beard}${crown}${item}${pip(s, 27, 29, 9)}`;
+}
+function cardSVG(c, mini){
+  const r = c[0], s = c[1], red = s==='h' || s==='d';
+  const ink = red ? '#c3312c' : '#1c2733';
+  if (mini){
+    return `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="10" fill="#fdfbf5" stroke="#bdb6a4" stroke-width="2"/>
+      <text x="50" y="62" text-anchor="middle" font-size="${r==='T'?50:58}" font-weight="700" fill="${ink}" font-family="Georgia,'Times New Roman',serif">${RANK_TXT(r)}</text>
+      ${pip(s, 50, 98, 52)}</svg>`;
+  }
+  const idx = `<text x="12" y="25" text-anchor="middle" font-size="${r==='T'?17:21}" font-weight="700" fill="${ink}" font-family="Georgia,'Times New Roman',serif" letter-spacing="${r==='T'?-1.5:0}">${RANK_TXT(r)}</text>${pip(s, 12, 36, 12)}`;
+  let middle;
+  if (PIPS[r]) {
+    const big = r==='A' ? (s==='s' ? 46 : 34) : 19;
+    middle = PIPS[r].map(([x,y])=>pip(s, x, y, big, y>70)).join('');
+  } else {
+    middle = `<rect x="22" y="18" width="56" height="104" rx="3" fill="#f6ead0" stroke="${ink}" stroke-width="1.6"/>
+      <clipPath id="cf-${c}"><rect x="23" y="19" width="54" height="102" rx="2"/></clipPath>
+      <g clip-path="url(#cf-${c})">${courtHalf(r, s, ink)}<g transform="rotate(180 50 70)">${courtHalf(r, s, ink)}</g></g>
+      <path d="M22 70 L78 70" stroke="${ink}" stroke-width=".8" opacity=".5"/>`;
+  }
+  return `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="8" fill="#fdfbf5" stroke="#bdb6a4" stroke-width="1.5"/>
+    ${middle}${idx}<g transform="rotate(180 50 70)">${idx}</g></svg>`;
+}
+const BACK_SVG = `<svg viewBox="0 0 100 140" aria-hidden="true"><rect x="1.5" y="1.5" width="97" height="137" rx="8" fill="#fdfbf5" stroke="#bdb6a4" stroke-width="1.5"/>
+  <rect x="7" y="7" width="86" height="126" rx="5" fill="url(#card-back)"/><rect x="7" y="7" width="86" height="126" rx="5" fill="none" stroke="#e9dcc0" stroke-width="1.2"/>
+  <rect x="13" y="13" width="74" height="114" rx="3" fill="none" stroke="#e9dcc0" stroke-width=".8" opacity=".7"/></svg>`;
 function cardHTML(c, opts={}){
   if (!c) return `<div class="card empty"></div>`;
-  if (c==='back') return `<div class="card back"></div>`;
-  const red = c[1]==='h' || c[1]==='d';
+  if (c==='back') return `<div class="card back">${BACK_SVG}</div>`;
   const key = (opts.key||'') + c;
   const fresh = opts.animate && !ui.seenCards.has(key); if (opts.animate) ui.seenCards.add(key);
-  return `<div class="card${red?' red':''}${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}"><span class="r">${c[0]==='T'?'10':c[0]}</span><span class="s">${SUIT_SYM[c[1]]}</span></div>`;
+  const label = `${RANK_TXT(c[0])} ${({s:'스페이드',h:'하트',d:'다이아',c:'클로버'})[c[1]]}`;
+  return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}">${cardSVG(c, opts.mini)}</div>`;
+}
+
+/* ---------- 카지노 칩 ---------- */
+const CHIPS = [
+  {v:5000, c:'#8c1d40', e:'#f3d27a', t:'5K'},
+  {v:1000, c:'#e0a12a', e:'#3a2a0a', t:'1K'},
+  {v:500,  c:'#6a3d9a', e:'#f4efe4', t:'500'},
+  {v:100,  c:'#1d1f22', e:'#f4efe4', t:'100'},
+  {v:25,   c:'#1f8a4c', e:'#f4efe4', t:'25'},
+  {v:5,    c:'#c62f2f', e:'#f4efe4', t:'5'},
+  {v:1,    c:'#f2efe6', e:'#2d5fa8', t:'1'},
+];
+// 시작 칩 구성 (이 개수로 테이블에 앉음)
+const START_STACKS = {
+  1000:  [[100,4],[25,16],[5,40]],              // $400 + $400 + $200
+  10000: [[1000,4],[500,6],[100,20],[25,40]],    // $4,000 + $3,000 + $2,000 + $1,000
+};
+function chipParts(amount){
+  const out = []; let left = Math.max(0, Math.round(amount));
+  for (const ch of CHIPS){ const n = Math.floor(left / ch.v); if (n){ out.push([ch, n]); left -= n*ch.v; } }
+  return out;
+}
+function chipOne(ch, i){ return `<i class="chip" style="--c:${ch.c};--e:${ch.e}${i!=null?`;--i:${i}`:''}"><b>${ch.t}</b></i>`; }
+// 금액을 칩 더미로 표시 (칩 종류별로 기둥, 기둥마다 최대 maxPer개)
+function chipStack(amount, {cols=3, maxPer=6}={}){
+  const parts = chipParts(amount).slice(0, cols);
+  if (!parts.length) return '';
+  return `<span class="stack">${parts.map(([ch,n])=>{
+    const k = Math.min(n, maxPer);
+    return `<span class="col" style="--n:${k}">${Array.from({length:k},(_,i)=>chipOne(ch, i)).join('')}</span>`;
+  }).join('')}</span>`;
+}
+function startStackHTML(total){
+  const parts = START_STACKS[total] || [];
+  return parts.map(([v,n])=>{ const ch = CHIPS.find(x=>x.v===v); return `<span class="startchip">${chipOne(ch)}<span>×${n}</span></span>`; }).join('');
 }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>t.hidden=true, 2600); }
 
@@ -58,9 +158,9 @@ function renderLobby(){
     <p>개인 카드 2장과 공용 카드 5장 중 가장 좋은 5장으로 겨룹니다.</p>
   </section>
   <div class="mode">
-    <span><b>시작 칩</b> <span class="note">게임 시작 전에 골라요. 컴퓨터 대결과 방 만들기 모두 적용</span></span>
+    <span><b>시작 금액</b> <span class="note">게임 시작 전에 골라요. 아래 칩 구성으로 받아요 (컴퓨터 대결·방 만들기 모두 적용)</span></span>
     <div class="levels chips2" role="radiogroup" aria-label="시작 칩">
-      ${Object.entries(CHIP_OPTIONS).map(([c,o])=>`<button role="radio" aria-checked="${chipChoice===+c}" class="level${chipChoice===+c?' on':''}" data-a="chips" data-v="${c}"><b class="num">${fmt(c)}개</b><span>블라인드 ${o.sb}/${o.bb}</span></button>`).join('')}
+      ${Object.entries(CHIP_OPTIONS).map(([c,o])=>`<button role="radio" aria-checked="${chipChoice===+c}" class="level${chipChoice===+c?' on':''}" data-a="chips" data-v="${c}"><b class="num">${fmt(c)}</b><span>블라인드 $${o.sb}/$${o.bb}</span><span class="startchips">${startStackHTML(+c)}</span></button>`).join('')}
     </div>
   </div>
   <div class="mode" style="flex-direction:row;align-items:center">
@@ -126,19 +226,52 @@ function saveRename(){
 }
 
 /* ---------- 테이블 ---------- */
-// 자리 위치(테이블 너비·높이 %): 내 자리(0)를 맨 아래에 두고 시계 방향.
-// 가운데 띠(공용 카드·팟)는 비워 두고, 옆자리는 가장자리로 붙여 카드가 가려지지 않게 함
+// 자리 위치(테이블 너비·높이 %): 내 자리(0)를 맨 아래 가운데에 두고 시계 방향.
+// 세로 화면: 가로로 긴 타원 위·아래에 줄지어 앉고, 인원이 많으면 양옆에도 앉음
 const SEAT_LAYOUT = {
-  2: [[50,91],[50,11]],
-  3: [[50,91],[14,24],[86,24]],
-  4: [[50,91],[12,48],[50,11],[88,48]],
-  5: [[50,91],[12,66],[22,13],[78,13],[88,66]],
-  6: [[50,91],[12,66],[12,30],[50,11],[88,30],[88,66]],
-  7: [[50,91],[16,82],[10,46],[28,11],[72,11],[90,46],[84,82]],
-  8: [[50,91],[18,83],[10,54],[14,22],[50,10],[86,22],[90,54],[82,83]],
-  9: [[50,91],[24,84],[10,60],[10,32],[28,11],[72,11],[90,32],[90,60],[76,84]],
+  2: [[50,90],[50,11]],
+  3: [[50,90],[25,11],[75,11]],
+  4: [[50,90],[11,50],[50,11],[89,50]],
+  5: [[50,90],[19,89],[25,11],[75,11],[81,89]],
+  6: [[50,90],[18,89],[18,11],[50,11],[82,11],[82,89]],
+  7: [[50,90],[22,89],[10,50],[30,11],[70,11],[90,50],[78,89]],
+  8: [[50,90],[22,89],[10,50],[18,11],[50,11],[82,11],[90,50],[78,89]],
+  9: [[50,90],[22,89],[10,50],[14,11],[38,11],[62,11],[86,11],[90,50],[78,89]],
 };
-function slotPos(k, N){ return (SEAT_LAYOUT[N] || SEAT_LAYOUT[6])[k]; }
+// 가로 화면(PC·태블릿): 2:1 타원 테두리를 따라 고르게
+function wideSlot(k, N){ const a = Math.PI/2 + k*2*Math.PI/N; return [50 + 44*Math.cos(a), 50 + 40*Math.sin(a)]; }
+const isWide = () => innerWidth >= 1000 && innerWidth > innerHeight;
+// 베팅 칩 위치: 자리에서 가운데 쪽으로, 공용 카드·팟과 자기 자리를 피해서 (단위: 테이블 %)
+function betPos(x, y, dense){
+  const wide = isWide();
+  const C = wide ? {l:25, r:75, t:30, b:70} : {l:dense?23:20, r:dense?77:80, t:34, b:68};   // 가운데(카드·팟) 영역
+  const bw = wide ? 4.5 : 8, bh = wide ? 6.5 : 5;                                            // 칩 더미 반쪽 크기
+  const sw = wide ? 6 : (dense ? 10 : 11), sh = wide ? 11 : 11;                              // 자리 반쪽 크기
+  const clear = (bx, by) => (bx+bw < C.l || bx-bw > C.r || by+bh < C.t || by-bh > C.b) && (Math.abs(bx-x) > sw+bw || Math.abs(by-y) > sh+bh);
+  for (let f = .5; f >= .12; f -= .02){ const bx = x + (50-x)*f, by = y + (50-y)*f; if (clear(bx, by)) return [bx, by]; }
+  return [x + (x<50 ? 1 : -1)*(sw*.4), y + sh + bh + 1];   // 옆자리: 자리 바로 아래
+}
+// 그려진 뒤 실제 크기를 재서, 베팅 칩이 카드·팟·자리·다른 칩과 겹치지 않는 첫 자리로 옮김
+function placeBets(){
+  const table = app.querySelector('.table'); if (!table) return;
+  const bets = [...table.querySelectorAll('.betchip')]; if (!bets.length) return;
+  const T = table.getBoundingClientRect(), R = e => e.getBoundingClientRect();
+  const hit = (a, c) => a.left < c.right-1 && c.left < a.right-1 && a.top < c.bottom-1 && c.top < a.bottom-1;
+  const blockers = [...table.querySelectorAll('.center .board, .center .pot, .center .stage, .seat')].map(R);
+  const placed = [];
+  bets.forEach(el=>{
+    const x = +el.dataset.x, y = +el.dataset.y, side = x < 50 ? 1 : -1, cands = [];
+    for (let f = .5; f >= .14; f -= .04) cands.push([x + (50-x)*f, y + (50-y)*f]);
+    cands.push([x + side*13, y], [x + side*9, y + (y<50 ? 15 : -15)], [x, y + (y<50 ? 19 : -19)], [x + side*9, y + (y<50 ? -15 : 15)], [x + side*17, y + (y<50 ? 8 : -8)]);
+    for (const [bx, by] of cands){
+      el.style.left = bx + '%'; el.style.top = by + '%';
+      const r = R(el);
+      if (r.left >= T.left && r.right <= T.right && !blockers.some(b=>hit(r, b)) && !placed.some(b=>hit(r, b))){ placed.push(r); return; }
+    }
+    el.style.left = cands[0][0] + '%'; el.style.top = cands[0][1] + '%'; placed.push(R(el));
+  });
+}
+function slotPos(k, N){ return isWide() ? wideSlot(k, N) : (SEAT_LAYOUT[N] || SEAT_LAYOUT[6])[k]; }
 function currentState(){ return view==='local' ? localState : net.state; }
 function renderTable(){
   const s = currentState();
@@ -173,7 +306,7 @@ function renderTable(){
     let hole = '';
     if (!isMe && p.inHand && !p.folded){
       const reveal = showAll && p.shown && p.cards[0] !== 'back';
-      hole = p.cards.map(c=>reveal ? cardHTML(c,{hl:winSet.has(i)&&winCards.has(c), dim: winSet.size && !winSet.has(i)}) : cardHTML('back')).join('');
+      hole = p.cards.map(c=>reveal ? cardHTML(c,{mini:true, hl:winSet.has(i)&&winCards.has(c), dim: winSet.size && !winSet.has(i)}) : cardHTML('back')).join('');
     }
     let st = '';
     if (s.stage==='done' && winSet.has(i)) st = `+${fmt(s.winners.find(w=>w.s===i).amt)}`;
@@ -189,8 +322,8 @@ function renderTable(){
     const bub = view==='online' && ui.bubbles[p.id] && ui.bubbles[p.id].until > now ? `<div class="bubble" data-bub="${esc(p.id)}"></div>` : '';
     seatsHTML += `<div class="${cls}" style="left:${x}%;top:${y}%">${bub}
       ${isMe ? '' : `<div class="hole">${hole}</div>`}
-      <div class="plate">${badge}<span class="nm" data-nm="${i}"></span><span class="ch num">${fmt(p.chips)}</span>${st?`<span class="st">${esc(st)}</span>`:''}</div>${timer}</div>`;
-    if (p.bet>0){ const bx = x + (50-x)*.42, by = y + (48-y)*.42; chips += `<div class="betchip num" style="left:${bx}%;top:${by}%">${fmt(p.bet)}</div>`; }
+      <div class="plate">${badge}<span class="nm" data-nm="${i}"></span><span class="ch num">${p.chips>0?chipOne(chipParts(p.chips)[0][0]):""}${fmt(p.chips)}</span>${st?`<span class="st">${esc(st)}</span>`:''}</div>${timer}</div>`;
+    if (p.bet>0){ const [bx, by] = betPos(x, y, N>=7); chips += `<div class="betchip" data-x="${x}" data-y="${y}" style="left:${bx}%;top:${by}%">${chipStack(p.bet,{cols:2,maxPer:5})}<span class="amt num">${fmt(p.bet)}</span></div>`; }
   }
   const boardHTML = Array.from({length:5},(_,k)=>cardHTML(s.board[k], {animate:true, key:s.handNo+':', hl: showAll && winCards.has(s.board[k])})).join('');
   let result = '';
@@ -200,12 +333,12 @@ function renderTable(){
   const pot = s.stage==='done' ? s.winners.reduce((a,w)=>a+w.amt,0) : potSize(s);
 
   app.innerHTML = `${head}${statusLine}
-  <div class="table${N>=7?' dense':''}">
+  <div class="table${N>=7?' dense':''}${isWide()?' wide':''}">
     <div class="felt"></div>
     <div class="center">
       <span class="stage">${STAGE_KO[s.stage]||''}${s.handNo?` · #${s.handNo}`:''}</span>
       <div class="board">${boardHTML}</div>
-      ${pot? `<span class="pot">팟 <b class="num">${fmt(pot)}</b></span>` : ''}
+      ${pot? `<span class="pot">${chipStack(pot,{cols:4,maxPer:7})}<span class="amt">팟 <b class="num">${fmt(pot)}</b></span></span>` : ''}
       <span class="result">${result}</span>
     </div>
     ${chips}${seatsHTML}
@@ -215,6 +348,7 @@ function renderTable(){
 
   app.querySelectorAll('[data-nm]').forEach(el=>{ el.textContent = nameOf(s, +el.dataset.nm); });
   app.querySelectorAll('[data-li]').forEach(el=>{ el.textContent = logName(s, {i:+el.dataset.li, id:el.dataset.lid, n:el.dataset.ln}); });
+  placeBets();
   app.querySelectorAll('[data-bub]').forEach(el=>{ const b = ui.bubbles[el.dataset.bub]; if (b) el.textContent = b.text; });
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
@@ -346,15 +480,15 @@ function openRules(){
   document.getElementById('sheet').innerHTML = `<div class="sheet" data-a="close-sheet"><div class="inner" role="dialog" aria-label="족보와 규칙">
     <div class="row" style="justify-content:space-between"><h3>족보 · 규칙</h3><button class="ghost" data-a="close-sheet">닫기</button></div>
     <h4>핸드 순위 (위가 강함)</h4>
-    <div class="scroll"><table class="rank">${ex.map((e,k)=>`<tr><td>${k+1}</td><td><span class="nm">${e[0]}</span><br><span class="note">${e[1]}</span></td><td><div class="ex">${e[2].map(c=>cardHTML(c)).join('')}</div></td></tr>`).join('')}</table></div>
+    <div class="scroll"><table class="rank">${ex.map((e,k)=>`<tr><td>${k+1}</td><td><span class="nm">${e[0]}</span><br><span class="note">${e[1]}</span></td><td><div class="ex">${e[2].map(c=>cardHTML(c,{mini:true})).join('')}</div></td></tr>`).join('')}</table></div>
     <h4>진행 순서</h4>
     <div class="flow"><div><b>프리플랍</b><span>개인 2장</span></div><div><b>플랍</b><span>공용 3장</span></div><div><b>턴</b><span>공용 1장</span></div><div><b>리버</b><span>공용 1장</span></div><div><b>쇼다운</b><span>패 공개</span></div></div>
     <h4>규칙 요약</h4>
     <div class="scroll"><table class="defs">
-      <tr><th>블라인드</th><td>딜러 왼쪽이 스몰 ${SBv}, 그다음이 빅 ${BBv}. 시작 칩 1,000개면 10/20, 10,000개면 50/100이에요. 2명일 땐 딜러가 스몰 블라인드를 내고 프리플랍에 먼저 액션해요.</td></tr>
+      <tr><th>블라인드</th><td>딜러 왼쪽이 스몰 $${SBv}, 그다음이 빅 $${BBv}. 시작 금액이 $1,000이면 $10/$20, $10,000이면 $50/$100이에요. 2명일 땐 딜러가 스몰 블라인드를 내고 프리플랍에 먼저 액션해요.</td></tr>
       <tr><th>액션 순서</th><td>프리플랍은 빅 블라인드 다음 사람부터, 플랍 이후는 딜러 왼쪽부터 시계 방향.</td></tr>
       <tr><th>체크 / 콜</th><td>걸린 베팅이 없으면 넘기기(체크), 있으면 같은 금액 맞추기(콜).</td></tr>
-      <tr><th>베팅 / 레이즈</th><td>최소 베팅은 ${BBv}. 레이즈는 직전 레이즈 폭 이상 올려야 해요. 노리밋이라 언제든 올인 가능.</td></tr>
+      <tr><th>베팅 / 레이즈</th><td>최소 베팅은 $${BBv}. 레이즈는 직전 레이즈 폭 이상 올려야 해요. 노리밋이라 언제든 올인 가능.</td></tr>
       <tr><th>짧은 올인</th><td>최소 레이즈에 못 미치는 올인은 이미 액션한 사람에게 다시 레이즈할 기회를 주지 않아요(콜·폴드만).</td></tr>
       <tr><th>사이드 팟</th><td>올인한 사람은 자신이 낸 만큼까지만 가져갈 수 있고, 나머지는 별도 팟으로 나뉘어요.</td></tr>
       <tr><th>무승부</th><td>같은 패면 팟을 나눠요. 나누고 남는 칩은 딜러 왼쪽에 가까운 사람에게.</td></tr>
@@ -573,7 +707,7 @@ async function hostRoom(){
   if (net.token!==token) return;
   net.room = genId(10);
   const s = emptyTable(hostSeats, chipChoice); s.seats[0] = makeSeat(me.pid, {name: me.name, chips:s.startChips});
-  logIt(s, 0, `방을 열었어요 (최대 ${hostSeats}명 · 칩 ${fmt(s.startChips)} · 블라인드 ${s.sb}/${s.bb})`);
+  logIt(s, 0, `방을 열었어요 (최대 ${hostSeats}명 · 칩 ${fmt(s.startChips)} · 블라인드 $${s.sb}/$${s.bb})`);
   net.hostState = s; net.state = viewFor(s, me.pid);
   net.tick = setInterval(hostTick, 1000);
   connectHost(0, token, 0);
@@ -797,6 +931,7 @@ function leaveToLobby(){ closeNet(); clearTimeout(localTimer); view='lobby'; set
 
 /* ================= 이벤트 ================= */
 function render(){
+  document.body.classList.toggle('wide-table', (view==='local' || view==='online') && isWide());
   if (view==='lobby') renderLobby(); else if (view==='join') renderJoin(); else renderTable();
   const box = document.getElementById('chatbox'); if (box && box.hidden === (view==='online' && !!net.state)) renderChat(true);
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
@@ -878,3 +1013,6 @@ document.addEventListener('touchend', e=>{
   lastTouchEnd = now;
 }, {passive:false});
 document.addEventListener('dblclick', e=>e.preventDefault(), {passive:false});
+// 화면을 돌리거나 창 크기를 바꾸면 배치 다시 계산
+let lastWide = isWide();
+addEventListener('resize', ()=>{ clearTimeout(render.rz); render.rz = setTimeout(()=>{ const w = isWide(); if (w!==lastWide){ lastWide = w; if (view==='local' || view==='online') render(); } else placeBets(); }, 150); });
