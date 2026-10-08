@@ -2168,10 +2168,14 @@ function syncMusic(){
   if (snd.on && inGame() && !document.hidden){
     if (snd.ctx){ const g = snd.master.gain, t = snd.ctx.currentTime; if (g.value < .99){ g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(1, t + .25); } }
     startMusic();
-  } else stopMusic();
+  } else { stopMusic(); if (!inGame()) snd.pos = 0; } // 새 게임에 들어오면 인트로부터
 }
-const MUSIC_URL = 'audio/lounge.mp3', MUSIC_LEN = 75.1785; // 32마디 (96 → 114 → 96bpm)
-function musicPos(){ return snd.ctx && snd.src ? ((snd.ctx.currentTime - snd.t0) % MUSIC_LEN + MUSIC_LEN) % MUSIC_LEN : (snd.pos || 0); }
+const MUSIC_URL = 'audio/lounge.mp3', LOOP_START = 4.2, LOOP_END = 79.3785; // 인트로(처음 한 번) + 32마디 반복 (96 → 114 → 96bpm)
+function musicPos(){
+  if (!(snd.ctx && snd.src)) return snd.pos || 0;
+  const e = snd.ctx.currentTime - snd.t0, end = snd.loopEnd || LOOP_END;
+  return e < end ? e : LOOP_START + (e - LOOP_START) % (end - LOOP_START);
+}
 function stopMusic(fast){
   if (!snd.ctx || !snd.src) return;
   snd.pos = musicPos();
@@ -2190,9 +2194,9 @@ async function startMusic(){
   if (!snd.buf){ await loadMusic(ctx); }
   if (!snd.buf || !snd.on || !inGame() || snd.src || document.hidden || ctx !== snd.ctx) return;
   const src = ctx.createBufferSource(); src.buffer = snd.buf; src.loop = true;
-  src.loopStart = 0; src.loopEnd = Math.min(MUSIC_LEN, snd.buf.duration);
+  const end = Math.min(LOOP_END, snd.buf.duration); src.loopStart = LOOP_START; src.loopEnd = end; snd.loopEnd = end;
   src.connect(snd.music);
-  const t = ctx.currentTime, off = (snd.pos || 0) % src.loopEnd;
+  const t = ctx.currentTime, off = Math.min(snd.pos || 0, end - .01);
   const g = snd.music.gain; g.cancelScheduledValues(t); g.setValueAtTime(0, t); g.linearRampToValueAtTime(.38, t + (off ? .8 : 1.5));
   src.start(t, off); snd.src = src; snd.t0 = t - off;
 }
@@ -2221,8 +2225,8 @@ const sfx = (()=>{
   const hiss = (t, dur, type, f, q, peak, dec, f2) => { const c = snd.ctx, s = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain(); s.buffer = N(); fl.type = type; fl.frequency.setValueAtTime(f, t); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + dur); fl.Q.value = q; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + Math.min(.01, dur / 3)); g.gain.setTargetAtTime(0, t + Math.min(.01, dur / 3), dec); s.connect(fl); fl.connect(g); g.connect(snd.sfx); s.start(t, Math.random() * .5, dur + dec * 6); };
   // 칩 하나가 부딪히는 소리 (점토 칩: 짧고 맑은 '딱')
   const clink = (t, v) => { const f = 2600 + Math.random() * 1600; tone(f, t, .11 * v, .012); tone(f * 1.47, t, .06 * v, .009); hiss(t, .03, 'highpass', 3500, .7, .12 * v, .006); tone(700 + Math.random() * 300, t, .05 * v, .015); };
-  // 카지노 코인 '띠링!' (두 음이 짧게 올라가는 종소리)
-  const coin = (t, v = 1, up = 1) => { [[987.8, 0, .07], [1318.5, .07, .2]].forEach(([f, d, dec]) => { [[1, 1], [2.76, .4], [5.4, .18], [8.93, .07]].forEach(([r, a], k) => tone(f * up * r, t + d, .15 * v * a, dec / (1 + k * .9))); }); hiss(t, .02, 'highpass', 6000, .7, .06 * v, .004); };
+  // 카지노 벨 '띠링~' (보내준 영상의 벨 소리 배음 구조를 본떠 합성: 약 1380Hz, 배음 비율 1 : 2.56 : 4.54 : 6.85)
+  const coin = (t, v = 1, up = 1) => { const f = 1378 * up; [[1, 1, .42], [2.56, .55, .24], [4.54, .85, .14], [6.85, .35, .08]].forEach(([r, a, d]) => tone(f * r, t, .13 * v * a, d)); hiss(t, .025, 'highpass', 7000, .7, .07 * v, .005); };
   const chips = (n, spread = .05, v = 1) => { const t0 = snd.ctx.currentTime + .01; for (let k = 0; k < n; k++) clink(t0 + k * spread * (.6 + Math.random() * .8), v * (.7 + Math.random() * .4)); };
   return {
     // 체크: 테이블을 손가락으로 '똑똑'
@@ -2230,9 +2234,9 @@ const sfx = (()=>{
     // 콜: 칩 몇 개
     call(){ if (ok()) coin(snd.ctx.currentTime + .01, .9); },
     // 베팅·레이즈: 칩 여러 개를 내려놓음
-    bet(){ if (ok()) coin(snd.ctx.currentTime + .01, 1, 1.12); },
+    bet(){ if (ok()) coin(snd.ctx.currentTime + .01, 1); },
     // 올인: 칩 더미를 한꺼번에 밀어 넣음
-    allin(){ if (!ok()) return; coin(snd.ctx.currentTime + .01, 1, 1.12); chips(16, .035, 1.1); hiss(snd.ctx.currentTime, .35, 'bandpass', 1800, .6, .12, .12, 900); },
+    allin(){ if (!ok()) return; coin(snd.ctx.currentTime + .01, 1); chips(16, .035, 1.1); hiss(snd.ctx.currentTime, .35, 'bandpass', 1800, .6, .12, .12, 900); },
     // 폴드: 카드를 테이블에 미끄러뜨림
     fold(){ if (!ok()) return; hiss(snd.ctx.currentTime + .01, .22, 'bandpass', 1500, .9, .22, .07, 4200); },
     // 카드 한 장 넘기기
