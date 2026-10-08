@@ -4,7 +4,12 @@
    휴대폰에서 매번 합성하면 수십 초가 걸려서, 미리 만들어 둔 파일을 씁니다. */
 async function renderMusic(rate, bars, solo){
   const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const BPM = 96, B = 60 / BPM, BAR = 4 * B, BARS = bars || 32, LEN = BARS * BAR;
+  // 템포: 1~16마디 96 → 17~20마디 점점 빨라짐 → 21~28마디 114로 달림 → 29~32마디 다시 96으로 (반복 이음매 자연스럽게)
+  const BARS = bars || 32;
+  const bpmOf = bar => bar < 16 ? 96 : bar < 20 ? 96 + (bar - 15) * 4.5 : bar < 28 ? 114 : 114 - (bar - 27) * 4.5;
+  const beatOf = [], startOf = [0];
+  for (let b = 0; b < BARS; b++){ beatOf.push(60 / bpmOf(b)); startOf.push(startOf[b] + 4 * beatOf[b]); }
+  const LEN = startOf[BARS];
   const sr = Math.min(rate || 44100, 44100);
   const ctx = new OAC(2, Math.ceil(LEN * sr), sr);
   let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -44,7 +49,7 @@ async function renderMusic(rate, bars, solo){
   ];
   // 두 번째 반복은 긴장감 있게: 멜로디는 쉬고 도미넌트 마디에서만 짧은 비브라폰 필인
   const FILL = [[3,2,76,.67],[3,2.67,73,.33],[3,3,70,1],[7,2,79,.67],[7,2.67,77,.33],[7,3,73,1],[11,2.67,82,.33],[11,3,79,1],[15,1,76,.67],[15,1.67,73,.33],[15,2,70,1],[15,3,69,1]];
-  const at = (bar, beat) => bar * BAR + beat * B;
+  const at = (bar, beat) => startOf[bar] + beat * beatOf[bar];
 
   const ep = (m, t, dur, vel) => { // 로즈 피아노 같은 FM 음색
     const f = hz(m), end = t + dur, stop = end + .5;
@@ -76,6 +81,7 @@ async function renderMusic(rate, bars, solo){
   const COMP = [[[0,.9,.85],[1+SW,.3,.7]], [[SW,.3,.75],[2,1.2,.8]], [[0,.5,.8],[2+SW,1,.75]], [[1+SW,.3,.7],[3,.6,.75]], [[0,2,.85]]];
   for (let bar = 0; bar < BARS; bar++){
     const [root, q, voic] = PROG[bar % 16], next = PROG[(bar + 1) % 16][0];
+    const B = beatOf[bar], BAR = 4 * B, fast = bar >= 20 && bar < 28;
     const T = at(bar, 0), second = bar >= 16;
     // 일렉 피아노 컴핑
     const pat = COMP[Math.floor(rnd() * COMP.length)];
@@ -90,12 +96,15 @@ async function renderMusic(rate, bars, solo){
     hat(T + B); hat(T + 3 * B);
     brush(T + B, .14); brush(T + 3 * B, .16); if (rnd() < .4) brush(T + (2 + SW) * B, .06);
     kick(T, .32); if (rnd() < .3) kick(T + (2 + SW) * B, .18);
+    if (fast){ kick(T + 2 * B, .22); ride(T + (SW) * B, .4); ride(T + (2 + SW) * B, .5); hat(T + (1 + SW) * B); }
     if (bar % 8 === 7) { brush(T + (3 + SW) * B, .12); kick(T + (3 + SW) * B, .25); }
     // 낮게 깔리는 긴장감 패드 (마지막 4마디마다)
     if (bar % 16 >= 12){ const g = ctx.createGain(); env(g, T, .8, 1, 1.4, T + BAR - .1); const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; g.connect(lp); lp.connect(padBus); osc('sawtooth', hz(root + 12), T, T + BAR + .6, g); osc('sawtooth', hz(root + 12) * 1.004, T, T + BAR + .6, g); }
   }
-  MEL.forEach(([bar, bt, m, d]) => vib(m, at(bar, bt), d * B, .55));
-  FILL.forEach(([bar, bt, m, d]) => vib(m, at(bar + 16, bt), d * B, .45));
+  MEL.forEach(([bar, bt, m, d]) => { if (bar < BARS) vib(m, at(bar, bt), d * beatOf[bar], .55); });
+  // 빨라지는 구간(21~28마디)에서 주제 멜로디가 다시 나옴
+  MEL.forEach(([bar, bt, m, d]) => { const b2 = bar + 20; if (bar < 8 && b2 < BARS) vib(m, at(b2, bt), d * beatOf[b2], .6); });
+  FILL.forEach(([bar, bt, m, d]) => { const b2 = bar + 16; if ((bar === 3 || bar === 15) && b2 < BARS) vib(m, at(b2, bt), d * beatOf[b2], .45); });
 
   const buf = await ctx.startRendering();
   // 크기 맞추기 + 이음매가 튀지 않게 앞뒤 살짝 페이드
@@ -103,6 +112,7 @@ async function renderMusic(rate, bars, solo){
   buf.rawPeak = peak;
   const k = peak > 0 ? .85 / peak : 1, fade = Math.floor(sr * .02);
   for (let ch = 0; ch < buf.numberOfChannels; ch++){ const d = buf.getChannelData(ch); for (let i = 0; i < d.length; i++){ let v = d[i] * k; if (i < fade) v *= i / fade; else if (i > d.length - fade) v *= (d.length - i) / fade; d[i] = v; } }
+  buf.loopLen = LEN;
   return buf;
 }
 
