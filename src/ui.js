@@ -511,7 +511,7 @@ function renderTable(){
     else if (!p.inHand && s.stage!=='idle' && s.stage!=='done') st = '다음 핸드부터';
     const badge = s.stage!=='idle' && i===s.dealer ? '<span class="badge">D</span>' : '';
     const timer = acting && view==='online' ? `<div class="timer"><i data-deadline="${s.turnDeadline}"></i></div>` : '';
-    const bub = ui.bubbles[p.id] && ui.bubbles[p.id].until > now ? `<div class="bubble${ui.bubbles[p.id].emo?' emo':''}" data-bub="${esc(p.id)}"></div>` : '';
+    const bub = ui.bubbles[p.id] && ui.bubbles[p.id].until > now ? `<div class="bubble${ui.bubbles[p.id].emo?' emo':''}${y < 30 ? ' below' : ''}" data-bub="${esc(p.id)}"></div>` : '';
     seatsHTML += `<div class="${cls}" style="left:${x}%;top:${y}%">${bub}
       ${isMe ? '' : `<div class="hole">${hole}</div>`}
       <div class="plate">${badge}<span class="nm" data-nm="${i}"></span><span class="ch num">${p.chips>0?chipOne(chipParts(p.chips)[0][0]):""}${fmt(p.chips)}</span>${st?`<span class="st">${esc(st)}</span>`:''}</div>${timer}</div>`;
@@ -542,14 +542,58 @@ function renderTable(){
   app.querySelectorAll('[data-li]').forEach(el=>{ el.textContent = logName(s, {i:+el.dataset.li, id:el.dataset.lid, n:el.dataset.ln}); });
   placeBets();
   app.querySelectorAll('[data-bub]').forEach(el=>{ const b = ui.bubbles[el.dataset.bub]; if (b) renderRich(el, b.text); });
+  fitBubbles();
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
   tickTimers();
   mountFaces(app);
+  placeQuickChat();
   // 이름 입력 중 화면이 갱신돼도 입력이 끊기지 않게
   if (ui.renameOpen && ui.renameFocus){ const r = document.getElementById('rename-in'); if (r){ r.focus(); const n = r.value.length; try { r.setSelectionRange(n, n); } catch(_){} } }
 }
 
+// 말풍선이 화면 밖으로 나가지 않게 옆으로 밀고, 꼬리는 계속 그 사람을 가리키게
+function fitBubbles(){
+  const W = document.documentElement.clientWidth, pad = 6;
+  app.querySelectorAll('.bubble').forEach(el=>{
+    // 애니메이션 중 크기 변화와 무관하게, 실제 폭(offsetWidth)과 자리 가운데로 계산
+    const seat = el.parentElement.getBoundingClientRect(), cx = seat.left + seat.width/2, w = el.offsetWidth;
+    const left = cx - w/2, right = cx + w/2;
+    let sh = 0;
+    if (left < pad) sh = pad - left; else if (right > W - pad) sh = (W - pad) - right;
+    el.style.setProperty('--shift', sh + 'px');
+  });
+}
+// 이모티콘 줄 밑 작은 채팅 칸. 테이블은 턴마다 다시 그려지므로, 입력이 끊기지 않게 테이블 밖에 두고 위치만 맞춤
+const qchat = (()=>{
+  const f = document.createElement('form');
+  f.className = 'qchat'; f.id = 'qchat-form'; f.hidden = true; f.noValidate = true; f.autocomplete = 'off';
+  f.innerHTML = `<button type="button" class="qchat-open" aria-label="채팅 입력하기"><span class="emo-t">💬</span><span>채팅</span></button>
+    <input id="qchat-in" maxlength="200" placeholder="메시지" enterkeyhint="send" aria-label="채팅 메시지">
+    <button type="submit" class="qchat-send" aria-label="보내기">↑</button>`;
+  document.body.appendChild(f);
+  const inp = f.querySelector('input');
+  const open = () => { f.classList.add('open'); inp.focus(); };
+  f.querySelector('.qchat-open').addEventListener('click', open);
+  inp.addEventListener('blur', () => setTimeout(() => { if (!inp.value.trim() && document.activeElement !== inp) f.classList.remove('open'); }, 120));
+  f.addEventListener('submit', e => {
+    e.preventDefault();
+    const t = cleanChat(inp.value); if (!t) { inp.focus(); return; }
+    if (view === 'online') { if (sendChat(t)) inp.value = ''; }
+    else { localBubble(t); inp.value = ''; }
+    inp.focus();
+  });
+  return f;
+})();
+function placeQuickChat(){
+  const strip = (view==='local' || view==='online') ? app.querySelector('.emostrip') : null;
+  if (!strip){ qchat.hidden = true; return; }
+  const r = strip.getBoundingClientRect();
+  qchat.hidden = false;
+  qchat.style.left = (r.left + scrollX) + 'px';
+  qchat.style.top = (r.bottom + scrollY + 5) + 'px';
+  qchat.style.width = Math.max(r.width, 118) + 'px';
+}
 // 내 자리 왼쪽: 이모티콘 3개 + 더보기(+) / 오른쪽: 내 칩 종류별 더미
 function mySideHTML(s, p){
   const quick = EMOJIS.slice(0, 3).map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${emojiHTML(e)}</button>`).join('');
@@ -837,18 +881,26 @@ function receiveChat(m){
   net.chat.push({pid:String(m.pid||''), n:cleanName(m.n), text:cleanChat(m.text), ts:+m.ts||Date.now()});
   if (net.chat.length > CHAT_MAX) net.chat.splice(0, net.chat.length - CHAT_MAX);
   renderChat(true);
-  ui.bubbles[m.pid] = {text: cleanChat(m.text), until: Date.now() + 4500, emo: EMOJIS.includes(cleanChat(m.text))};
+  const life = bubbleLife(cleanChat(m.text));
+  ui.bubbles[m.pid] = {text: cleanChat(m.text), until: Date.now() + life, emo: EMOJIS.includes(cleanChat(m.text))};
   if (view==='online') renderTable();
-  setTimeout(()=>{ if (view==='online') renderTable(); }, 4600);
+  setTimeout(()=>{ if (view==='online') renderTable(); }, life + 100);
 }
 // 이모티콘 바로 보내기: 온라인이면 채팅으로(모두에게 말풍선), 컴퓨터 대결이면 내 자리 말풍선만
+// 말풍선이 떠 있는 시간: 길수록 오래 (4.5초 ~ 12초)
+const bubbleLife = t => Math.min(12000, Math.max(4500, 2500 + [...String(t)].length * 90));
+// 컴퓨터 대결에서는 채팅 대신 내 자리 말풍선만
+function localBubble(text){
+  const life = bubbleLife(text);
+  ui.bubbles['me'] = {text, until: Date.now() + life, emo: EMOJIS.includes(text)};
+  render(); setTimeout(()=>{ if (view==='local') render(); }, life + 100);
+}
 function sendEmoji(e){
   if (!EMOJIS.includes(e)) return;
   ui.emoOpen = false;
   if (view==='online') sendChat(e);
   else {
-    ui.bubbles['me'] = {text:e, until: Date.now() + 3500, emo:true};
-    render(); setTimeout(()=>{ if (view==='local') render(); }, 3600);
+    localBubble(e);
   }
   if (view!=='online') return;
   render();
@@ -1119,6 +1171,7 @@ function closeNet(){
   Object.assign(net, {mq:null, token:null, peers:new Map(), hostState:null, state:null, key:null, keys:null, gotState:false, hostStatus:'', status:'', tick:null, helloTimer:null, sendQ:Promise.resolve()});
   net.chat = []; net.lastChat = {}; ui.bubbles = {}; ui.trays = {};
   const ci = document.getElementById('chat-in'); if (ci) ci.value = '';
+  const qi = document.getElementById('qchat-in'); if (qi){ qi.value = ''; qchat.classList.remove('open'); }
   const pad = document.getElementById('emoji-pad'); if (pad) pad.hidden = true;
 }
 function sendNet(d){
@@ -1147,6 +1200,7 @@ function render(){
   document.body.classList.toggle('wide-table', (view==='local' || view==='online') && isWide());
   if (view==='lobby') renderLobby(); else if (view==='join') renderJoin(); else renderTable();
   mountFaces(app);
+  if (view==='lobby' || view==='join') placeQuickChat();
   const box = document.getElementById('chatbox'); if (box && box.hidden === (view==='online' && !!net.state)) renderChat(true);
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
     clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 4500);
@@ -1236,4 +1290,4 @@ document.addEventListener('touchend', e=>{
 document.addEventListener('dblclick', e=>e.preventDefault(), {passive:false});
 // 화면을 돌리거나 창 크기를 바꾸면 배치 다시 계산
 let lastWide = isWide();
-addEventListener('resize', ()=>{ clearTimeout(render.rz); render.rz = setTimeout(()=>{ const w = isWide(); if (w!==lastWide){ lastWide = w; if (view==='local' || view==='online') render(); } else placeBets(); }, 150); });
+addEventListener('resize', ()=>{ clearTimeout(render.rz); render.rz = setTimeout(()=>{ const w = isWide(); if (w!==lastWide){ lastWide = w; if (view==='local' || view==='online') render(); } else { placeBets(); placeQuickChat(); fitBubbles(); } }, 150); });
