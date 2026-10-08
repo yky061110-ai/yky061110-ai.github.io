@@ -1,0 +1,16 @@
+{
+  "name": "홀덤 테이블",
+  "short_name": "홀덤",
+  "description": "텍사스 홀덤 포커. 컴퓨터와 대결하거나 초대 링크로 친구들과 온라인으로 함께 플레이.",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1d19",
+  "theme_color": "#0b1d19",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
