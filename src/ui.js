@@ -4,7 +4,7 @@ const fmt = n => Number(n||0).toLocaleString('ko-KR');
 const esc = t => String(t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let view = 'lobby', botCount = 3;
 let localState = null, localTimer = null;
-let ui = {raiseOpen:false, raiseTo:0, raiseKey:'', seenCards:new Set()};
+let ui = {raiseOpen:false, raiseTo:0, raiseKey:'', seenCards:new Set(), bubbles:{}};
 
 /* 이 기기의 플레이어 정보 */
 function store(k, v){ try { if (v===undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(_){ return null; } }
@@ -154,7 +154,8 @@ function renderTable(){
     else if (!p.inHand && s.stage!=='idle' && s.stage!=='done') st = '다음 핸드부터';
     const badge = s.stage!=='idle' && i===s.dealer ? '<span class="badge">D</span>' : '';
     const timer = acting && view==='online' ? `<div class="timer"><i data-deadline="${s.turnDeadline}"></i></div>` : '';
-    seatsHTML += `<div class="${cls}" style="left:${x}%;top:${y}%">
+    const bub = view==='online' && ui.bubbles[p.id] && ui.bubbles[p.id].until > now ? `<div class="bubble" data-bub="${esc(p.id)}"></div>` : '';
+    seatsHTML += `<div class="${cls}" style="left:${x}%;top:${y}%">${bub}
       ${isMe ? '' : `<div class="hole">${hole}</div>`}
       <div class="plate">${badge}<span class="nm" data-nm="${i}"></span><span class="ch num">${fmt(p.chips)}</span>${st?`<span class="st">${esc(st)}</span>`:''}</div>${timer}</div>`;
     if (p.bet>0){ const bx = x + (50-x)*.45, by = y + (46-y)*.45; chips += `<div class="betchip num" style="left:${bx}%;top:${by}%">${fmt(p.bet)}</div>`; }
@@ -182,6 +183,7 @@ function renderTable(){
 
   app.querySelectorAll('[data-nm]').forEach(el=>{ el.textContent = nameOf(s, +el.dataset.nm); });
   app.querySelectorAll('[data-li]').forEach(el=>{ el.textContent = logName(s, {i:+el.dataset.li, id:el.dataset.lid, n:el.dataset.ln}); });
+  app.querySelectorAll('[data-bub]').forEach(el=>{ const b = ui.bubbles[el.dataset.bub]; if (b) el.textContent = b.text; });
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
   tickTimers();
@@ -191,8 +193,9 @@ function renderTable(){
 
 function raiseLabel(s, i, to){ const p=s.seats[i]; if (to >= p.bet+p.chips) return `올인 ${fmt(to)}`; return `${s.currentBet===0?'베팅':'레이즈'} ${fmt(to)}`; }
 
-function inviteBox(){
-  if (view!=='online' || net.role!=='host' || !net.hostId) return '';
+function inviteBox(s){
+  // 게임이 시작되면 숨김 (위쪽 ‘초대 링크’ 버튼은 계속 사용 가능)
+  if (view!=='online' || net.role!=='host' || !net.hostId || s.stage!=='idle') return '';
   return `<div class="tablecode">초대 링크 <span class="num" id="invite-url" style="font-size:12px;letter-spacing:0;word-break:break-all;min-width:0">${esc(inviteLink())}</span><button class="ghost" data-a="invite">보내기</button></div>`;
 }
 
@@ -270,7 +273,7 @@ function renderDock(s, mi, now){
         <button class="primary" type="submit">저장</button></form>`;
     }
   }
-  return `<div class="dock">${mine}${controls}${extra}${inviteBox()}</div>`;
+  return `<div class="dock">${mine}${controls}${extra}${inviteBox(s)}</div>`;
 }
 
 function localGameOver(s){
@@ -349,7 +352,63 @@ function scheduleLocal(){
 function nextLocalHand(){ if (view!=='local' || localState.stage!=='done' || localGameOver(localState)) return; localState = startHand(localState, Date.now()); afterLocal(); }
 
 /* ================= 온라인 모드 (PeerJS: 방장 브라우저가 딜러) ================= */
-const net = {peer:null, role:null, hostId:'', conns:new Map(), conn:null, state:null, hostState:null, tick:null, status:'', retries:0};
+const net = {peer:null, role:null, hostId:'', conns:new Map(), conn:null, state:null, hostState:null, tick:null, status:'', retries:0, chat:[], lastChat:{}};
+
+/* ---------- 채팅 ---------- */
+const EMOJIS = '😀 😂 🤣 😊 😍 😎 🤔 😮 😭 😡 😱 🥶 🤑 😴 🤐 😈 🙏 👍 👎 👏 🙌 💪 🔥 💯 🎉 💰 💸 🍀 🃏 ♠️ ♥️ ♦️ ♣️ ❤️ 💀 🤡 👀 ✌️ 👋 🍻'.split(' ');
+const CHAT_MAX = 60;
+function cleanChat(t){ return String(t||'').replace(/[\u0000-\u001f]/g,' ').replace(/\s+/g,' ').trim().slice(0,200); }
+// 방장만 실행: 메시지를 받아 모두에게 전달
+function chatPost(pid, name, text){
+  text = cleanChat(text); if (!text) return;
+  const now = Date.now(); if (now - (net.lastChat[pid]||0) < 400) return; net.lastChat[pid] = now;
+  const m = {pid, n: name, text, ts: now};
+  for (const c of net.conns.values()){ try { if (c.conn.open) c.conn.send({t:'chat', m}); } catch(_){} }
+  receiveChat(m);
+}
+function receiveChat(m){
+  if (!m || !m.text) return;
+  net.chat.push({pid:String(m.pid||''), n:cleanName(m.n), text:cleanChat(m.text), ts:+m.ts||Date.now()});
+  if (net.chat.length > CHAT_MAX) net.chat.splice(0, net.chat.length - CHAT_MAX);
+  renderChat(true);
+  ui.bubbles[m.pid] = {text: cleanChat(m.text), until: Date.now() + 4500};
+  if (view==='online') renderTable();
+  setTimeout(()=>{ if (view==='online') renderTable(); }, 4600);
+}
+function sendChat(text){
+  text = cleanChat(text); if (!text) return false;
+  if (net.role==='host'){ chatPost(me.pid, me.name, text); return true; }
+  if (net.conn && net.conn.open){ net.conn.send({t:'chat', text}); return true; }
+  toast('방장과 연결되어 있지 않아요.'); return false;
+}
+function renderChat(scroll){
+  const box = document.getElementById('chatbox'); if (!box) return;
+  const show = view==='online' && !!net.state;
+  box.hidden = !show; if (!show) return;
+  const list = document.getElementById('chat-list');
+  list.textContent = '';
+  if (!net.chat.length){ const li = document.createElement('li'); li.className = 'sys'; li.textContent = '아직 메시지가 없어요. 인사해 보세요 👋'; list.appendChild(li); }
+  net.chat.forEach(m=>{
+    const li = document.createElement('li'); if (m.pid===me.pid) li.className = 'mine';
+    const who = document.createElement('span'); who.className = 'who'; who.textContent = m.pid===me.pid ? '나' : m.n;
+    const tx = document.createElement('span'); tx.textContent = m.text;
+    li.append(who, tx); list.appendChild(li);
+  });
+  if (scroll) list.scrollTop = list.scrollHeight;
+}
+function toggleEmojiPad(force){
+  const pad = document.getElementById('emoji-pad'), btn = document.getElementById('emoji-btn');
+  if (!pad.childElementCount) pad.innerHTML = EMOJIS.map(e=>`<button type="button" data-emo="${e}" aria-label="${e}">${e}</button>`).join('');
+  const open = force!==undefined ? force : pad.hidden;
+  pad.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+}
+function insertEmoji(e){
+  const inp = document.getElementById('chat-in');
+  const a = inp.selectionStart ?? inp.value.length, b = inp.selectionEnd ?? inp.value.length;
+  if ((inp.value.length - (b-a) + e.length) > 200) return;
+  inp.value = inp.value.slice(0,a) + e + inp.value.slice(b);
+  const pos = a + e.length; inp.focus(); try { inp.setSelectionRange(pos, pos); } catch(_){}
+}
 
 function roomFromURL(){ try { return new URLSearchParams(location.search).get('room'); } catch(_){ return null; } }
 function setRoomURL(id){ try { const u = new URL(location.href); if (id) u.searchParams.set('room', id); else u.searchParams.delete('room'); history.replaceState(null, '', u); } catch(_){} }
@@ -405,9 +464,11 @@ function onHostMsg(conn, d){
     if (i>=0){ n.seats[i].away = false; n.seats[i].name = name; logIt(n, i, '다시 연결됨'); }
     else { i = n.seats.findIndex(p=>!p); if (i>=0){ n.seats[i] = makeSeat(pid, {name}); logIt(n, i, '입장'); } }
     net.hostState = n; hostBroadcast();
+    try { conn.send({t:'chatlog', list: net.chat.slice(-30)}); } catch(_){}
     return;
   }
   const c = net.conns.get(conn.peer); if (!c) return;
+  if (d.t==='chat'){ chatPost(c.pid, c.name, d.text); return; }
   if (d.t==='rename') c.name = cleanName(d.name);
   hostApply(c.pid, c.name, d);
 }
@@ -470,7 +531,12 @@ function joinRoom(id){
     const conn = net.peer.connect(id, {reliable:true}); net.conn = conn;
     const giveUp = setTimeout(()=>{ if (!conn.open){ net.status = '방에 연결하지 못했어요. 방장이 페이지를 열어 두었는지 확인해 주세요.'; render(); } }, 12000);
     conn.on('open', ()=>{ clearTimeout(giveUp); conn.send({t:'hello', pid: me.pid, name: me.name}); net.status = ''; render(); });
-    conn.on('data', d=>{ if (d && d.t==='state'){ net.state = d.s; render(); } });
+    conn.on('data', d=>{
+      if (!d) return;
+      if (d.t==='state'){ net.state = d.s; render(); }
+      else if (d.t==='chat') receiveChat(d.m);
+      else if (d.t==='chatlog' && Array.isArray(d.list)){ net.chat = []; d.list.slice(-CHAT_MAX).forEach(m=>{ if (m && m.text) net.chat.push({pid:String(m.pid||''), n:cleanName(m.n), text:cleanChat(m.text), ts:+m.ts||0}); }); renderChat(true); }
+    });
     conn.on('close', ()=>{ if (view==='online'){ net.status = '방장과 연결이 끊겼어요. 방장이 페이지를 닫았을 수 있어요.'; render(); } });
   });
   net.peer.on('disconnected', ()=>{ if (net.peer && !net.peer.destroyed) net.peer.reconnect(); });
@@ -488,6 +554,9 @@ function closeNet(){
   clearInterval(net.tick); net.tick = null;
   try { if (net.peer) net.peer.destroy(); } catch(_){}
   net.peer = null; net.conn = null; net.conns = new Map(); net.hostState = null; net.state = null; net.retries = 0;
+  net.chat = []; net.lastChat = {}; ui.bubbles = {};
+  const ci = document.getElementById('chat-in'); if (ci) ci.value = '';
+  const pad = document.getElementById('emoji-pad'); if (pad) pad.hidden = true;
 }
 function sendNet(d){
   if (net.role==='host') hostApply(me.pid, me.name, d);
@@ -506,6 +575,7 @@ function genCode(){ const A='abcdefghjkmnpqrstuvwxyz23456789'; let c=''; for (le
 /* ================= 이벤트 ================= */
 function render(){
   if (view==='lobby') renderLobby(); else if (view==='join') renderJoin(); else renderTable();
+  const box = document.getElementById('chatbox'); if (box && box.hidden === (view==='online' && !!net.state)) renderChat(true);
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
     clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 4500);
   }
@@ -538,7 +608,15 @@ document.addEventListener('click', async e=>{
 document.addEventListener('submit', e=>{
   if (e.target.id==='join-form'){ e.preventDefault(); submitJoin(); }
   if (e.target.id==='rename-form'){ e.preventDefault(); saveRename(); }
+  if (e.target.id==='chat-form'){
+    e.preventDefault();
+    const inp = document.getElementById('chat-in');
+    if (sendChat(inp.value)){ inp.value = ''; toggleEmojiPad(false); }
+    inp.focus();
+  }
 });
+document.getElementById('emoji-btn').addEventListener('click', ()=>toggleEmojiPad());
+document.getElementById('emoji-pad').addEventListener('click', e=>{ const b = e.target.closest('[data-emo]'); if (b) insertEmoji(b.dataset.emo); });
 document.addEventListener('input', e=>{
   if (e.target.id==='join-name') ui.joinDraft = e.target.value;
   if (e.target.id==='rename-in') ui.renameDraft = e.target.value;
