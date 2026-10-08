@@ -669,3 +669,14 @@ if (startRoom && /^holdem-[a-z0-9]{8}$/.test(startRoom)){ pendingRoom = startRoo
 render();
 
 if ('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+// iOS 사파리는 user-scalable=no를 무시하므로 확대 제스처를 직접 막음
+['gesturestart','gesturechange','gestureend'].forEach(t=>document.addEventListener(t, e=>e.preventDefault(), {passive:false}));
+document.addEventListener('touchmove', e=>{ if (e.touches && e.touches.length > 1) e.preventDefault(); }, {passive:false});
+let lastTouchEnd = 0;
+document.addEventListener('touchend', e=>{
+  const now = Date.now();
+  if (now - lastTouchEnd < 320 && !e.target.closest('input,textarea')){ e.preventDefault(); if (e.target.closest('button,[data-a]')) e.target.click(); }
+  lastTouchEnd = now;
+}, {passive:false});
+document.addEventListener('dblclick', e=>e.preventDefault(), {passive:false});

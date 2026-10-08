@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>홀덤 테이블</title>
 <meta name="description" content="텍사스 홀덤 포커. 컴퓨터와 대결하거나 초대 링크로 친구들과 온라인으로 함께 플레이.">
 <meta name="theme-color" content="#0b1d19">
@@ -204,6 +204,13 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-
 :root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 body{margin:0;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none!important}
+
+/* 더블탭·핀치 확대 막기, 게임 화면 글자 선택 막기 (입력칸은 그대로) */
+html,body{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+*{touch-action:manipulation}
+body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea,.chat-list,#invite-url{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+input,textarea,select{font-size:16px}
 </style>
 </head>
 <body>
@@ -1132,6 +1139,17 @@ if (startRoom && /^holdem-[a-z0-9]{8}$/.test(startRoom)){ pendingRoom = startRoo
 render();
 
 if ('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+// iOS 사파리는 user-scalable=no를 무시하므로 확대 제스처를 직접 막음
+['gesturestart','gesturechange','gestureend'].forEach(t=>document.addEventListener(t, e=>e.preventDefault(), {passive:false}));
+document.addEventListener('touchmove', e=>{ if (e.touches && e.touches.length > 1) e.preventDefault(); }, {passive:false});
+let lastTouchEnd = 0;
+document.addEventListener('touchend', e=>{
+  const now = Date.now();
+  if (now - lastTouchEnd < 320 && !e.target.closest('input,textarea')){ e.preventDefault(); if (e.target.closest('button,[data-a]')) e.target.click(); }
+  lastTouchEnd = now;
+}, {passive:false});
+document.addEventListener('dblclick', e=>e.preventDefault(), {passive:false});
 
 </script>
 </body>
