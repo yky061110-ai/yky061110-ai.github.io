@@ -1425,16 +1425,11 @@ function syncMusic(){
     melStart();
   } else melStop(!inGame());   // 처음 화면으로 나가면 다음 게임은 인트로부터
 }
-// ---------- 배경음악: 인트로 → 6곡 메들리를 계속 이어서 재생 ----------
+// ---------- 배경음악: 인트로(한 번) → '라운지 블러프' 계속 반복 ----------
 // 모든 기기에서 <audio> 하나로 재생 (아이폰·아이패드에서 가장 안정적). 곡 파일은 미리 알맞은 음량으로 만들어 둠
 const MUSIC_INTRO = 'audio/lounge-intro.mp3';
 const PLAYLIST = [
-  {src:'audio/song1.mp3', title:'라운지 블러프'},
-  {src:'audio/song2.mp3', title:'하이 롤러'},
-  {src:'audio/song3.mp3', title:'올인'},
-  {src:'audio/song4.mp3', title:'새벽 3시'},
-  {src:'audio/song5.mp3', title:'잭팟'},
-  {src:'audio/song6.mp3', title:'리버 카드'},
+  {src:'audio/lounge-loop.mp3', title:'라운지 블러프', loop:true},
 ];
 const mel = {a: null, idx: -2, playing: false, unlocked: false};   // idx: -2 처음, -1 인트로, 0~ 곡 번호
 function melInit(){
@@ -1445,7 +1440,7 @@ function melInit(){
 }
 function melLoad(i){
   mel.idx = i; const src = i < 0 ? MUSIC_INTRO : PLAYLIST[i].src;
-  mel.a.src = src;
+  mel.a.src = src; mel.a.loop = i >= 0 && !!PLAYLIST[i].loop;
   const nx = PLAYLIST[(i + 1 + PLAYLIST.length) % PLAYLIST.length]; fetch(nx.src).catch(()=>{});   // 다음 곡 미리 받아 두기
   try { if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: i < 0 ? '홀덤 테이블' : PLAYLIST[i].title, artist: '홀덤 테이블 배경음악'}); } catch(_){}
 }
