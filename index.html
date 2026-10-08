@@ -309,6 +309,26 @@ button .emo-i,.bubble .emo-i{vertical-align:middle}
 .rank .prob b{color:var(--brass);font-weight:600}
 
 /* 추천플레이 */
+.result{border:1px solid var(--brass);border-radius:12px;background:var(--bg);padding:10px 10px 8px}
+.res-title{font-weight:700;font-size:14px;color:var(--brass);margin-bottom:6px}
+.res-table{width:100%;border-collapse:collapse;font-size:13px}
+.res-table th{white-space:nowrap;font-size:11px;font-weight:500;color:var(--muted);text-align:left;padding:0 4px 4px;border-bottom:1px solid var(--line)}
+.res-table td{padding:5px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
+.res-table tr:last-child td{border-bottom:0}
+.res-table tr.w td{background:rgba(212,175,55,.10)}
+.res-table tr.f td{opacity:.6}
+.res-table tr.me .res-nm{font-weight:700}
+.res-nm{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-nm small{color:var(--muted);font-weight:400}
+.res-cards{white-space:nowrap;--cw:26px;width:60px}
+.res-cards .card{display:inline-block;margin-right:3px;vertical-align:middle}
+.res-hn{font-size:12px;word-break:keep-all}
+body.wide-table .res-cards{--cw:30px;width:68px}
+.res-out{text-align:right;white-space:nowrap}
+.res-win{color:var(--brass)}
+.res-lose{color:var(--muted)}
+.res-fold{color:var(--muted);font-size:12px}
+.res-note{margin:6px 0 0;font-size:11px;color:var(--muted)}
 .advice{border:1px solid var(--line);border-radius:12px;background:var(--bg);overflow:hidden}
 .adv-toggle{width:100%;display:flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--ink);font-weight:700;font-size:14px;padding:10px 12px;text-align:left}
 .adv-toggle .adv-street{font-weight:500;font-size:12px;color:var(--brass);border:1px solid var(--brass);border-radius:999px;padding:0 7px}
@@ -393,7 +413,7 @@ const HAND = ['하이카드','원 페어','투 페어','트리플','스트레이
 const SEATS = 6, MIN_SEATS = 2, MAX_SEATS = 9, START_CHIPS = 10000, SB = 10, BB = 20;
 // 시작 칩에 따라 블라인드가 정해짐
 const CHIP_OPTIONS = { 1000: {sb:10, bb:20}, 10000: {sb:50, bb:100} };
-const TURN_MS = 30000, NEXT_MS = 6000;
+const TURN_MS = 30000, NEXT_MS = 10000;
 const BETTING = new Set(['preflop','flop','turn','river']);
 const STAGE_KO = {idle:'대기 중',preflop:'프리플랍',flop:'플랍',turn:'턴',river:'리버',done:'핸드 종료'};
 
@@ -584,7 +604,17 @@ function showdown(s, now){
   s.uncontested = false;
   endHand(s, now);
 }
-function endHand(s, now){ s.stage='done'; s.toAct=-1; s.currentBet=0; s.nextHandAt = now + NEXT_MS; s.seats.forEach(p=>{ if(p){ p.bet=0; } }); }
+function endHand(s, now){
+  s.stage='done'; s.toAct=-1; s.currentBet=0; s.nextHandAt = now + NEXT_MS;
+  // 판이 끝나면 폴드한 사람까지 전원 카드 공개 (결과 비교용)
+  s.seats.forEach(p=>{
+    if (!p) return; p.bet=0;
+    if (!p.inHand || p.cards.length<2) return;
+    p.shown = true;
+    if (s.board.length>=3){ const b = best(p.cards.concat(s.board)); p.hn = handName(b); p.sc = b.score; }
+    else { p.hn = p.cards[0][0]===p.cards[1][0] ? '포켓 페어' : '하이카드'; p.sc = 0; }
+  });
+}
 
 /* ================= 컴퓨터 플레이어 ================= */
 function equity(hole, board, nOpp, iters){
@@ -1189,13 +1219,13 @@ function renderTable(){
     const acting = betting && s.toAct===i;
     const cls = ['seat', acting?'acting':'', p.folded&&p.inHand?'folded':'', (!p.inHand && p.chips===0)?'out':'', winSet.has(i)&&s.stage==='done'?'win':''].join(' ');
     let hole = '';
-    if (!isMe && p.inHand && !p.folded){
-      const reveal = showAll && p.shown && p.cards[0] !== 'back';
-      hole = p.cards.map(c=>reveal ? cardHTML(c,{mini:true, hl:winSet.has(i)&&winCards.has(c), dim: winSet.size && !winSet.has(i)}) : cardHTML('back')).join('');
+    const opened = s.stage==='done' && p.shown && p.cards.length===2 && p.cards[0] !== 'back';
+    if (!isMe && p.inHand && (!p.folded || opened)){
+      hole = p.cards.map(c=>opened ? cardHTML(c,{mini:true, hl:showAll&&winSet.has(i)&&winCards.has(c), dim: p.folded || (winSet.size && !winSet.has(i))}) : cardHTML('back')).join('');
     }
     let st = '';
     if (s.stage==='done' && winSet.has(i)) st = `+${fmt(s.winners.find(w=>w.s===i).amt)}`;
-    else if (showAll && p.shown) st = p.hn;
+    else if (s.stage==='done' && p.shown && p.inHand) st = p.folded ? '폴드' : p.hn;
     else if (p.inHand && p.folded) st = '폴드';
     else if (p.allin && p.inHand) st = '올인';
     else if (!p.inHand && p.chips===0) st = view==='local' ? '탈락' : '칩 없음';
@@ -1369,6 +1399,24 @@ function adviceHTML(s, mi){
     </div></div>`;
 }
 
+// 판이 끝난 뒤 전원 카드·족보 비교표
+function resultHTML(s, mi){
+  if (s.stage!=='done') return '';
+  const won = {}; (s.winners||[]).forEach(w=>{ won[w.s] = (won[w.s]||0) + w.amt; });
+  const rows = [];
+  s.seats.forEach((p,i)=>{ if (p && p.inHand && p.cards && p.cards.length===2 && p.cards[0]!=='back') rows.push({i, p, w: won[i]||0}); });
+  if (rows.length<2) return '';
+  const rank = r => r.w ? 0 : r.p.folded ? 2 : 1;
+  rows.sort((a,b)=> rank(a)-rank(b) || b.w-a.w || (b.p.sc||0)-(a.p.sc||0));
+  const winHands = new Set(rows.filter(r=>r.w).map(r=>r.i));
+  const body = rows.map(r=>{
+    const res = r.w ? `<b class="res-win num">+${fmt(r.w)}</b>` : r.p.folded ? `<span class="res-fold">폴드</span>` : `<span class="res-lose">패배</span>`;
+    const hn = r.p.hn ? esc(r.p.hn) : '';
+    return `<tr class="${r.w?'w':''}${r.p.folded?' f':''}${r.i===mi?' me':''}"><td class="res-nm"><span data-nm="${r.i}"></span>${r.i===mi?' <small>(나)</small>':''}</td><td class="res-cards">${r.p.cards.map(c=>cardHTML(c,{mini:true, dim:r.p.folded})).join('')}</td><td class="res-hn">${hn}</td><td class="res-out">${res}</td></tr>`;
+  }).join('');
+  const note = s.uncontested ? '<p class="res-note">모두 폴드해서 끝난 판이에요. 공개된 카드는 참고용이에요.</p>' : '';
+  return `<div class="result"><div class="res-title">이번 핸드 결과</div><table class="res-table"><thead><tr><th>플레이어</th><th>카드</th><th>족보</th><th>결과</th></tr></thead><tbody>${body}</tbody></table>${note}</div>`;
+}
 function renderDock(s, mi, now){
   if (mi<0){
     const full = s.seats.every(Boolean);
@@ -1450,7 +1498,7 @@ function renderDock(s, mi, now){
     }
   }
   const pop = ui.infoOpen && HAND_INFO[handTxt] ? infoPopHTML(handTxt) : '';
-  return `<div class="dock">${pop}${mine}${adviceHTML(s, mi)}${controls}${extra}${inviteBox(s)}</div>`;
+  return `<div class="dock">${pop}${resultHTML(s, mi)}${mine}${adviceHTML(s, mi)}${controls}${extra}${inviteBox(s)}</div>`;
 }
 
 function localGameOver(s){
@@ -1714,7 +1762,7 @@ function inviteLink(){ return `${location.origin}${location.pathname}#r=${net.ro
 // 상대에게 보내는 화면용 상태: 덱과 남의 카드는 숨김
 function viewFor(s, pid){
   const v = clone(s); v.deck = [];
-  const reveal = v.stage==='done' && !v.uncontested;
+  const reveal = v.stage==='done';
   v.seats.forEach(p=>{
     if (!p || p.id===pid) return;
     if (reveal && p.shown) return;
@@ -1964,7 +2012,7 @@ function render(){
   if (view==='lobby' || view==='join') placeQuickChat();
   const box = document.getElementById('chatbox'); if (box && box.hidden === (view==='online' && !!net.state)) renderChat(true);
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
-    clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 4500);
+    clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 9000);
   }
 }
 document.addEventListener('click', async e=>{
@@ -2053,7 +2101,6 @@ document.addEventListener('dblclick', e=>e.preventDefault(), {passive:false});
 // 화면을 돌리거나 창 크기를 바꾸면 배치 다시 계산
 let lastWide = isWide();
 addEventListener('resize', ()=>{ clearTimeout(render.rz); render.rz = setTimeout(()=>{ const w = isWide(); if (w!==lastWide){ lastWide = w; if (view==='local' || view==='online') render(); } else { placeBets(); placeQuickChat(); fitBubbles(); } }, 150); });
-
 </script>
 </body>
 </html>

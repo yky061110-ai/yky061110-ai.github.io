@@ -506,13 +506,13 @@ function renderTable(){
     const acting = betting && s.toAct===i;
     const cls = ['seat', acting?'acting':'', p.folded&&p.inHand?'folded':'', (!p.inHand && p.chips===0)?'out':'', winSet.has(i)&&s.stage==='done'?'win':''].join(' ');
     let hole = '';
-    if (!isMe && p.inHand && !p.folded){
-      const reveal = showAll && p.shown && p.cards[0] !== 'back';
-      hole = p.cards.map(c=>reveal ? cardHTML(c,{mini:true, hl:winSet.has(i)&&winCards.has(c), dim: winSet.size && !winSet.has(i)}) : cardHTML('back')).join('');
+    const opened = s.stage==='done' && p.shown && p.cards.length===2 && p.cards[0] !== 'back';
+    if (!isMe && p.inHand && (!p.folded || opened)){
+      hole = p.cards.map(c=>opened ? cardHTML(c,{mini:true, hl:showAll&&winSet.has(i)&&winCards.has(c), dim: p.folded || (winSet.size && !winSet.has(i))}) : cardHTML('back')).join('');
     }
     let st = '';
     if (s.stage==='done' && winSet.has(i)) st = `+${fmt(s.winners.find(w=>w.s===i).amt)}`;
-    else if (showAll && p.shown) st = p.hn;
+    else if (s.stage==='done' && p.shown && p.inHand) st = p.folded ? '폴드' : p.hn;
     else if (p.inHand && p.folded) st = '폴드';
     else if (p.allin && p.inHand) st = '올인';
     else if (!p.inHand && p.chips===0) st = view==='local' ? '탈락' : '칩 없음';
@@ -686,6 +686,24 @@ function adviceHTML(s, mi){
     </div></div>`;
 }
 
+// 판이 끝난 뒤 전원 카드·족보 비교표
+function resultHTML(s, mi){
+  if (s.stage!=='done') return '';
+  const won = {}; (s.winners||[]).forEach(w=>{ won[w.s] = (won[w.s]||0) + w.amt; });
+  const rows = [];
+  s.seats.forEach((p,i)=>{ if (p && p.inHand && p.cards && p.cards.length===2 && p.cards[0]!=='back') rows.push({i, p, w: won[i]||0}); });
+  if (rows.length<2) return '';
+  const rank = r => r.w ? 0 : r.p.folded ? 2 : 1;
+  rows.sort((a,b)=> rank(a)-rank(b) || b.w-a.w || (b.p.sc||0)-(a.p.sc||0));
+  const winHands = new Set(rows.filter(r=>r.w).map(r=>r.i));
+  const body = rows.map(r=>{
+    const res = r.w ? `<b class="res-win num">+${fmt(r.w)}</b>` : r.p.folded ? `<span class="res-fold">폴드</span>` : `<span class="res-lose">패배</span>`;
+    const hn = r.p.hn ? esc(r.p.hn) : '';
+    return `<tr class="${r.w?'w':''}${r.p.folded?' f':''}${r.i===mi?' me':''}"><td class="res-nm"><span data-nm="${r.i}"></span>${r.i===mi?' <small>(나)</small>':''}</td><td class="res-cards">${r.p.cards.map(c=>cardHTML(c,{mini:true, dim:r.p.folded})).join('')}</td><td class="res-hn">${hn}</td><td class="res-out">${res}</td></tr>`;
+  }).join('');
+  const note = s.uncontested ? '<p class="res-note">모두 폴드해서 끝난 판이에요. 공개된 카드는 참고용이에요.</p>' : '';
+  return `<div class="result"><div class="res-title">이번 핸드 결과</div><table class="res-table"><thead><tr><th>플레이어</th><th>카드</th><th>족보</th><th>결과</th></tr></thead><tbody>${body}</tbody></table>${note}</div>`;
+}
 function renderDock(s, mi, now){
   if (mi<0){
     const full = s.seats.every(Boolean);
@@ -767,7 +785,7 @@ function renderDock(s, mi, now){
     }
   }
   const pop = ui.infoOpen && HAND_INFO[handTxt] ? infoPopHTML(handTxt) : '';
-  return `<div class="dock">${pop}${mine}${adviceHTML(s, mi)}${controls}${extra}${inviteBox(s)}</div>`;
+  return `<div class="dock">${pop}${resultHTML(s, mi)}${mine}${adviceHTML(s, mi)}${controls}${extra}${inviteBox(s)}</div>`;
 }
 
 function localGameOver(s){
@@ -1031,7 +1049,7 @@ function inviteLink(){ return `${location.origin}${location.pathname}#r=${net.ro
 // 상대에게 보내는 화면용 상태: 덱과 남의 카드는 숨김
 function viewFor(s, pid){
   const v = clone(s); v.deck = [];
-  const reveal = v.stage==='done' && !v.uncontested;
+  const reveal = v.stage==='done';
   v.seats.forEach(p=>{
     if (!p || p.id===pid) return;
     if (reveal && p.shown) return;
@@ -1281,7 +1299,7 @@ function render(){
   if (view==='lobby' || view==='join') placeQuickChat();
   const box = document.getElementById('chatbox'); if (box && box.hidden === (view==='online' && !!net.state)) renderChat(true);
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
-    clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 4500);
+    clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 9000);
   }
 }
 document.addEventListener('click', async e=>{
