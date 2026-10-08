@@ -83,6 +83,24 @@ function aceOfSpadesArt(){
     <path d="M50 13 L52 16 L50 19 L48 16 Z" fill="#1c2733"/><circle cx="44.5" cy="16" r=".9" fill="#1c2733"/><circle cx="55.5" cy="16" r=".9" fill="#1c2733"/>`;
 }
 const COURT_IMG = r => 'JQK'.includes(r);
+// 그림 카드 12장을 미리 불러와 디코딩해 두고 계속 붙잡아 둠 (화면을 다시 그려도 바로 그려지게)
+const COURT_CACHE = {};
+(function preloadCourts(){
+  for (const r of 'JQK') for (const s of 'SHDC'){
+    const img = new Image(); img.decoding = 'async'; img.className = 'face'; img.alt = ''; img.draggable = false; img.src = `cards/${r}${s}.webp`;
+    COURT_CACHE[r+s] = img;
+    if (img.decode) img.decode().catch(()=>{});
+  }
+})();
+const courtReady = key => { const img = COURT_CACHE[key]; return !!(img && img.complete && img.naturalWidth > 0); };
+// 화면을 다시 그린 뒤, 미리 불러 둔 그림 요소를 그대로 옮겨 끼움 (새로 만들지 않으니 깜빡임이 없음)
+function mountFaces(root){
+  (root || document).querySelectorAll('.face-slot').forEach(slot=>{
+    const img = COURT_CACHE[slot.dataset.face];
+    if (!img) return;
+    slot.replaceWith(img.isConnected ? img.cloneNode() : img);
+  });
+}
 function cardSVG(c, mini){
   const r = c[0], s = c[1], red = s==='h' || s==='d';
   const ink = red ? '#c3312c' : '#1c2733';
@@ -208,8 +226,13 @@ function cardHTML(c, opts={}){
   const key = (opts.key||'') + c;
   const fresh = opts.animate && !ui.seenCards.has(key); if (opts.animate) ui.seenCards.add(key);
   const label = `${RANK_TXT(c[0])} ${({s:'스페이드',h:'하트',d:'다이아',c:'클로버'})[c[1]]}`;
-  const face = !opts.mini && COURT_IMG(c[0]) ? `<img class="face" src="cards/${c[0]}${c[1].toUpperCase()}.webp" alt="" draggable="false" onerror="this.remove()">` : '';
-  return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}">${cardSVG(c, opts.mini)}${face}</div>`;
+  if (!opts.mini && COURT_IMG(c[0])){
+    const key = c[0] + c[1].toUpperCase(), src = `cards/${key}.webp`;
+    // 이미 준비된 그림이면 예비 그림 없이 바로(동기 디코딩) 그려서 깜빡임이 없게
+    if (courtReady(key)) return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}"><span class="face-slot" data-face="${key}"></span></div>`;
+    return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}">${cardSVG(c, opts.mini)}<img class="face" src="${src}" alt="" draggable="false" decoding="sync" onerror="this.remove()"></div>`;
+  }
+  return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}">${cardSVG(c, opts.mini)}</div>`;
 }
 
 /* ---------- 카지노 칩 ---------- */
@@ -522,6 +545,7 @@ function renderTable(){
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
   tickTimers();
+  mountFaces(app);
   // 이름 입력 중 화면이 갱신돼도 입력이 끊기지 않게
   if (ui.renameOpen && ui.renameFocus){ const r = document.getElementById('rename-in'); if (r){ r.focus(); const n = r.value.length; try { r.setSelectionRange(n, n); } catch(_){} } }
 }
@@ -1122,6 +1146,7 @@ function leaveToLobby(){ closeNet(); clearTimeout(localTimer); view='lobby'; set
 function render(){
   document.body.classList.toggle('wide-table', (view==='local' || view==='online') && isWide());
   if (view==='lobby') renderLobby(); else if (view==='join') renderJoin(); else renderTable();
+  mountFaces(app);
   const box = document.getElementById('chatbox'); if (box && box.hidden === (view==='online' && !!net.state)) renderChat(true);
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
     clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 4500);
