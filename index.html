@@ -235,6 +235,21 @@ body.wide-table #app>.dock{grid-area:dock}
 body.wide-table #app>.log{grid-area:log;max-height:200px}
 body.wide-table #chatbox{grid-area:chat;margin:0;max-width:none}
 body.wide-table .mine .hole{--cw:64px}
+
+/* 내 이름 줄: 이모티콘 버튼 · 이름 · 보유 칩 */
+.mehead{display:flex;align-items:center;gap:10px;min-width:0}
+.emo-btn{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--panel-2);font-size:22px;line-height:1;display:grid;place-items:center}
+.emo-btn.on{border-color:var(--brass);box-shadow:inset 0 0 0 1px var(--brass)}
+.myname{font-family:var(--f-display);font-weight:400;font-size:19px;min-width:0;flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tray{margin-left:auto;display:flex;gap:7px;align-items:flex-end;flex:none;--sz:20px}
+.tcol{display:flex;flex-direction:column;align-items:center;gap:3px}
+.tcol .count{font-size:10.5px;color:var(--muted);line-height:1}
+.emo-quick{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px}
+.emo-quick button{background:transparent;border:0;font-size:24px;line-height:1;padding:7px 0;border-radius:8px}
+.emo-quick button:hover,.emo-quick button:focus-visible{background:var(--panel-2)}
+.bubble.emo{font-size:24px;padding:2px 8px;background:var(--card);line-height:1.2}
+.table.wide .bubble.emo{font-size:32px}
+@media (max-width:380px){.tray{--sz:17px;gap:5px}.myname{font-size:17px}}
 @media (max-width:420px){
   .mine .hole{--cw:50px}
   .hero h2{font-size:38px}
@@ -715,6 +730,49 @@ function chipStack(amount, {cols=3, maxPer=6}={}){
     return `<span class="col" style="--n:${k}">${Array.from({length:k},(_,i)=>chipOne(ch, i)).join('')}</span>`;
   }).join('')}</span>`;
 }
+function chipBreakdown(amount, startTotal){
+  const start = START_STACKS[startTotal] || START_STACKS[10000];
+  const kinds = start.map(([v])=>v);                     // 이 테이블에서 쓰는 칩 종류 (큰 것부터)
+  let left = Math.max(0, Math.round(amount)); const cnt = {};
+  // 작은 칩부터 시작할 때 받은 개수만큼 채우고
+  for (const [v, n] of [...start].reverse()){ const k = Math.min(n, Math.floor(left / v)); if (k){ cnt[v] = k; left -= k*v; } }
+  // 나머지는 큰 칩으로
+  for (const v of kinds){ const k = Math.floor(left / v); if (k){ cnt[v] = (cnt[v]||0) + k; left -= k*v; } }
+  // 더 작은 단위가 남으면 $5, $1 칩으로
+  for (const v of [5, 1]){ const k = Math.floor(left / v); if (k){ cnt[v] = (cnt[v]||0) + k; left -= k*v; } }
+  return CHIPS.filter(ch=>cnt[ch.v]).map(ch=>[ch, cnt[ch.v]]);
+}
+// 내 칩을 실제처럼 기억: 낼 때는 가진 칩으로(필요하면 거슬러 받고), 딸 때는 받은 만큼 위에 쌓음
+const TRAY_KINDS = [5000, 1000, 500, 100, 25, 5, 1];
+function addChips(cnt, amt){ for (const v of TRAY_KINDS){ const k = Math.floor(amt / v); if (k){ cnt[v] = (cnt[v]||0) + k; amt -= k*v; } } }
+function payChips(cnt, amt){
+  for (const v of TRAY_KINDS){ while ((cnt[v]||0) > 0 && v <= amt){ cnt[v]--; amt -= v; } }
+  while (amt > 0){                                    // 딱 맞는 칩이 없으면 큰 칩 하나를 깨서 거스름돈
+    const v = [...TRAY_KINDS].reverse().find(x => (cnt[x]||0) > 0 && x > amt);
+    if (!v) return false;
+    cnt[v]--; addChips(cnt, v - amt); amt = 0;
+  }
+  return true;
+}
+function trayParts(id, amount, startTotal){
+  ui.trays = ui.trays || {};
+  let t = ui.trays[id];
+  if (!t || t.amt === 0){                         // 처음이거나 리바이: 시작 칩 구성으로
+    t = {amt: amount, cnt: {}};
+    chipBreakdown(amount, startTotal).forEach(([ch, n])=>{ t.cnt[ch.v] = n; });
+  } else if (amount > t.amt) addChips(t.cnt, amount - t.amt);
+  else if (amount < t.amt && !payChips(t.cnt, t.amt - amount)){ t.cnt = {}; chipBreakdown(amount, startTotal).forEach(([ch, n])=>{ t.cnt[ch.v] = n; }); }
+  t.amt = amount; ui.trays[id] = t;
+  return CHIPS.filter(ch => t.cnt[ch.v] > 0).map(ch => [ch, t.cnt[ch.v]]);
+}
+function chipTray(amount, startTotal, id){
+  const parts = id ? trayParts(id, amount, startTotal) : chipBreakdown(amount, startTotal);
+  if (!parts.length) return '<span class="note">칩 없음</span>';
+  return parts.map(([ch, n])=>{
+    const k = Math.min(n, 12);
+    return `<span class="tcol" title="${fmt(ch.v)} × ${n}"><span class="stack"><span class="col" style="--n:${k}">${Array.from({length:k},(_,i)=>chipOne(ch, i)).join('')}</span></span><span class="count num">×${n}</span></span>`;
+  }).join('');
+}
 function startStackHTML(total){
   const parts = START_STACKS[total] || [];
   return parts.map(([v,n])=>{ const ch = CHIPS.find(x=>x.v===v); return `<span class="startchip">${chipOne(ch)}<span>×${n}</span></span>`; }).join('');
@@ -905,7 +963,7 @@ function renderTable(){
     else if (!p.inHand && s.stage!=='idle' && s.stage!=='done') st = '다음 핸드부터';
     const badge = s.stage!=='idle' && i===s.dealer ? '<span class="badge">D</span>' : '';
     const timer = acting && view==='online' ? `<div class="timer"><i data-deadline="${s.turnDeadline}"></i></div>` : '';
-    const bub = view==='online' && ui.bubbles[p.id] && ui.bubbles[p.id].until > now ? `<div class="bubble" data-bub="${esc(p.id)}"></div>` : '';
+    const bub = ui.bubbles[p.id] && ui.bubbles[p.id].until > now ? `<div class="bubble${ui.bubbles[p.id].emo?' emo':''}" data-bub="${esc(p.id)}"></div>` : '';
     seatsHTML += `<div class="${cls}" style="left:${x}%;top:${y}%">${bub}
       ${isMe ? '' : `<div class="hole">${hole}</div>`}
       <div class="plate">${badge}<span class="nm" data-nm="${i}"></span><span class="ch num">${p.chips>0?chipOne(chipParts(p.chips)[0][0]):""}${fmt(p.chips)}</span>${st?`<span class="st">${esc(st)}</span>`:''}</div>${timer}</div>`;
@@ -935,6 +993,7 @@ function renderTable(){
   app.querySelectorAll('[data-nm]').forEach(el=>{ el.textContent = nameOf(s, +el.dataset.nm); });
   app.querySelectorAll('[data-li]').forEach(el=>{ el.textContent = logName(s, {i:+el.dataset.li, id:el.dataset.lid, n:el.dataset.ln}); });
   placeBets();
+  app.querySelectorAll('[data-myname]').forEach(el=>{ el.textContent = ui.myNameText || '나'; });
   app.querySelectorAll('[data-bub]').forEach(el=>{ const b = ui.bubbles[el.dataset.bub]; if (b) el.textContent = b.text; });
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
@@ -1031,7 +1090,14 @@ function renderDock(s, mi, now){
         <button class="primary" type="submit">저장</button></form>`;
     }
   }
-  return `<div class="dock">${mine}${controls}${extra}${inviteBox(s)}</div>`;
+  const myName = view==='local' ? (store('holdem.name') || '나') : (p.name || me.name);
+  const head = `<div class="mehead">
+      <button class="emo-btn${ui.emoOpen?' on':''}" data-a="emo-toggle" aria-label="이모티콘 보내기" aria-expanded="${!!ui.emoOpen}">😀</button>
+      <b class="myname" data-myname></b>
+      <div class="tray" aria-label="보유 칩">${chipTray(p.chips, s.startChips||START_CHIPS, p.id)}</div>
+    </div>${ui.emoOpen ? `<div class="emo-quick" role="listbox" aria-label="이모티콘">${EMOJIS.map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e}">${e}</button>`).join('')}</div>` : ''}`;
+  ui.myNameText = myName;
+  return `<div class="dock">${head}${mine}${controls}${extra}${inviteBox(s)}</div>`;
 }
 
 function localGameOver(s){
@@ -1091,7 +1157,7 @@ function startLocal(){
   s.level = botLevel;
   s.seats[0] = makeSeat('me', {name:'나', chips:s.startChips});
   BOT_SEATS[botCount].forEach((seat,k)=>{ s.seats[seat] = makeSeat('bot'+k, {name:BOT_NAMES[k], chips:s.startChips, bot:true, per:{agg:.25+Math.random()*.55, loose:-.03+Math.random()*.1}}); });
-  view = 'local'; ui.seenCards = new Set();
+  view = 'local'; ui.seenCards = new Set(); ui.trays = {};
   localState = startHand(s, Date.now());
   afterLocal();
 }
@@ -1206,7 +1272,7 @@ function genId(n){ const A='abcdefghijkmnpqrstuvwxyz23456789'; let c=''; for (le
 const onlineSupported = () => !!(window.WebSocket && window.crypto && crypto.subtle);
 
 /* ---------- 채팅 ---------- */
-const EMOJIS = '😀 😂 🤣 😊 😍 😎 🤔 😮 😭 😡 😱 🥶 🤑 😴 🤐 😈 🙏 👍 👎 👏 🙌 💪 🔥 💯 🎉 💰 💸 🍀 🃏 ♠️ ♥️ ♦️ ♣️ ❤️ 💀 🤡 👀 ✌️ 👋 🍻'.split(' ');
+const EMOJIS = ['😀','😆','🤣','🤪','😜','😡','🤬','🤯','😵\u200d💫','😴','🤑','💩','👺','☠️','🤲','👏','🤝','👍','👎','✌️','👌','🖐️','🫵','🖕','🔥','🎰','💸','🚬','🪓','🔪','💣','📈','📉','‼️','⁉️','♣️','♥️','♦️','♠️','🃏'];
 const CHAT_MAX = 60;
 function cleanChat(t){ return String(t||'').replace(/[\u0000-\u001f]/g,' ').replace(/\s+/g,' ').trim().slice(0,200); }
 // 방장만 실행: 메시지를 받아 모두에게 전달
@@ -1222,9 +1288,21 @@ function receiveChat(m){
   net.chat.push({pid:String(m.pid||''), n:cleanName(m.n), text:cleanChat(m.text), ts:+m.ts||Date.now()});
   if (net.chat.length > CHAT_MAX) net.chat.splice(0, net.chat.length - CHAT_MAX);
   renderChat(true);
-  ui.bubbles[m.pid] = {text: cleanChat(m.text), until: Date.now() + 4500};
+  ui.bubbles[m.pid] = {text: cleanChat(m.text), until: Date.now() + 4500, emo: EMOJIS.includes(cleanChat(m.text))};
   if (view==='online') renderTable();
   setTimeout(()=>{ if (view==='online') renderTable(); }, 4600);
+}
+// 이모티콘 바로 보내기: 온라인이면 채팅으로(모두에게 말풍선), 컴퓨터 대결이면 내 자리 말풍선만
+function sendEmoji(e){
+  if (!EMOJIS.includes(e)) return;
+  ui.emoOpen = false;
+  if (view==='online') sendChat(e);
+  else {
+    ui.bubbles['me'] = {text:e, until: Date.now() + 3500, emo:true};
+    render(); setTimeout(()=>{ if (view==='local') render(); }, 3600);
+  }
+  if (view!=='online') return;
+  render();
 }
 function sendChat(text){
   text = cleanChat(text); if (!text) return false;
@@ -1490,7 +1568,7 @@ function closeNet(){
     setTimeout(()=>mq.end(), 250);
   }
   Object.assign(net, {mq:null, token:null, peers:new Map(), hostState:null, state:null, key:null, keys:null, gotState:false, hostStatus:'', status:'', tick:null, helloTimer:null, sendQ:Promise.resolve()});
-  net.chat = []; net.lastChat = {}; ui.bubbles = {};
+  net.chat = []; net.lastChat = {}; ui.bubbles = {}; ui.trays = {};
   const ci = document.getElementById('chat-in'); if (ci) ci.value = '';
   const pad = document.getElementById('emoji-pad'); if (pad) pad.hidden = true;
 }
@@ -1550,6 +1628,8 @@ document.addEventListener('click', async e=>{
     case 'raise-open': ui.raiseOpen = !ui.raiseOpen; render(); break;
     case 'preset': ui.raiseTo = +el.dataset.v; ui.raiseOpen = true; render(); break;
     case 'raise-go': doAction({type:'raise', to:ui.raiseTo}); break;
+    case 'emo-toggle': ui.emoOpen = !ui.emoOpen; render(); break;
+    case 'emo-send': sendEmoji(el.dataset.v); break;
     case 'rename-open': ui.renameOpen = !ui.renameOpen; ui.renameDraft = null; ui.renameFocus = ui.renameOpen; render(); break;
   }
 });
