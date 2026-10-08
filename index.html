@@ -620,7 +620,7 @@ function finishUncontested(s, w, now){
 function showdown(s, now){
   const S = s.seats;
   const alive = idxs(s, p=>p.inHand && !p.folded);
-  const ev = {}; alive.forEach(i=>{ ev[i] = best(S[i].cards.concat(s.board)); S[i].shown = true; S[i].hn = handName(ev[i]); });
+  const ev = {}; alive.forEach(i=>{ ev[i] = best(S[i].cards.concat(s.board)); S[i].shown = true; S[i].hn = ownHandLabel(S[i].cards, s.board); });
   const contrib = idxs(s, p=>p.inHand);
   const levels = [...new Set(alive.map(i=>S[i].total))].sort((a,b)=>a-b);
   const pots = []; let prev = 0;
@@ -639,7 +639,7 @@ function showdown(s, now){
     const share = Math.floor(pt.amt/ws.length); let rem = pt.amt - share*ws.length;
     ws.forEach(i=>{ const g = share + (rem>0?1:0); if (rem>0) rem--; won[i]=(won[i]||0)+g; });
   });
-  s.winners = Object.entries(won).map(([i,amt])=>({s:+i, amt, h:handName(ev[i])}));
+  s.winners = Object.entries(won).map(([i,amt])=>({s:+i, amt, h:ownHandLabel(S[i].cards, s.board)}));
   s.winners.forEach(w=>{ S[w.s].chips += w.amt; logIt(s, w.s, `${fmt(w.amt)} 획득 · ${w.h}`); });
   s.uncontested = false;
   endHand(s, now);
@@ -651,7 +651,7 @@ function endHand(s, now){
     if (!p) return; p.bet=0;
     if (!p.inHand || p.cards.length<2) return;
     p.shown = true;
-    if (s.board.length>=3){ const b = best(p.cards.concat(s.board)); p.hn = handName(b); p.sc = b.score; }
+    if (s.board.length>=3){ const b = best(p.cards.concat(s.board)); p.hn = ownHandLabel(p.cards, s.board); p.sc = b.score; }
     else { p.hn = p.cards[0][0]===p.cards[1][0] ? '포켓 페어' : '하이카드'; p.sc = 0; }
   });
 }
@@ -940,6 +940,15 @@ function boardNote(hole, board){
   const k = u.kick.length ? `실제 승부는 이 ${esc(u.name)}에 내 ${u.kick.map(cardTxt).join(' ')} 키커를 더해서 겨뤄요` : '내 카드는 승부에 안 쓰여서 비기기 쉬워요';
   const ga = ((u.name.charCodeAt(u.name.length-1)-0xAC00)%28) ? '이' : '가';
   return `<p class="adv-board">📋 바닥 카드만으로 ${esc(u.name)}${ga} 돼 있어요. 이건 모두가 같이 쓰는 패라 ${k}.</p>`;
+}
+// 판 결과·기록용 족보 이름: 바닥 카드만으로 된 족보는 내 것으로 치지 않고, 내 카드로 만든 조합 + 승부를 가른 키커로 표시
+function ownHandLabel(hole, board){
+  if (!hole || hole.length<2 || board.length<3) return '';
+  const mh = myHand(hole, board), name = mh ? handName(mh) : HAND[0];
+  const u = handUse(hole, board);
+  if (!u || !u.shared || !u.kick.length) return name;
+  const k = u.kick.slice().sort((x,y)=>rv(y)-rv(x))[0];
+  return `${name} (${k[0]==='T' ? '10' : k[0]}${{s:'♠',h:'♥',d:'♦',c:'♣'}[k[1]]} 키커)`;
 }
 function handUseHTML(u){
   if (!u) return '';

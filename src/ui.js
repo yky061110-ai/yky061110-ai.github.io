@@ -188,6 +188,15 @@ function boardNote(hole, board){
   const ga = ((u.name.charCodeAt(u.name.length-1)-0xAC00)%28) ? '이' : '가';
   return `<p class="adv-board">📋 바닥 카드만으로 ${esc(u.name)}${ga} 돼 있어요. 이건 모두가 같이 쓰는 패라 ${k}.</p>`;
 }
+// 판 결과·기록용 족보 이름: 바닥 카드만으로 된 족보는 내 것으로 치지 않고, 내 카드로 만든 조합 + 승부를 가른 키커로 표시
+function ownHandLabel(hole, board){
+  if (!hole || hole.length<2 || board.length<3) return '';
+  const mh = myHand(hole, board), name = mh ? handName(mh) : HAND[0];
+  const u = handUse(hole, board);
+  if (!u || !u.shared || !u.kick.length) return name;
+  const k = u.kick.slice().sort((x,y)=>rv(y)-rv(x))[0];
+  return `${name} (${k[0]==='T' ? '10' : k[0]}${{s:'♠',h:'♥',d:'♦',c:'♣'}[k[1]]} 키커)`;
+}
 function handUseHTML(u){
   if (!u) return '';
   if (u.shared){
