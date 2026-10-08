@@ -3,7 +3,7 @@
    브라우저 콘솔에서 renderMusic(44100) 을 실행하면 AudioBuffer가 만들어지고 (buf.loopStart ~ buf.loopEnd 구간이 반복 구간),
    이것을 WAV로 저장한 뒤 MP3(96kbps)로 변환한 것이 audio/lounge.mp3 입니다.
    휴대폰에서 매번 합성하면 수십 초가 걸려서, 미리 만들어 둔 파일을 씁니다. */
-async function renderMusic(rate, bars, solo){
+async function renderMusic(rate, bars, solo, ending){
   const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   // 템포: 1~16마디 96 → 17~20마디 점점 빨라짐 → 21~28마디 114로 달림 → 29~32마디 다시 96으로 (반복 이음매 자연스럽게)
   const BARS = bars || 32;
@@ -13,7 +13,8 @@ async function renderMusic(rate, bars, solo){
   for (let b = 0; b < BARS; b++){ beatOf.push(60 / bpmOf(b)); startOf.push(startOf[b] + 4 * beatOf[b]); }
   const LEN = startOf[BARS];
   const sr = Math.min(rate || 44100, 44100);
-  const ctx = new OAC(2, Math.ceil((LEN + TAIL) * sr), sr);
+  const END_LEN = ending ? 2 * 4 * 60 / 96 + 3 : 0;
+  const ctx = new OAC(2, Math.ceil((LEN + TAIL + END_LEN) * sr), sr);
   let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const hz = m => 440 * Math.pow(2, (m - 69) / 12);
   // 리버브 (작은 재즈바 느낌)
@@ -135,7 +136,20 @@ async function renderMusic(rate, bars, solo){
     [8, 8.5, 9, 9.25, 9.5, 9.75].forEach((bt, k) => snare(.02 + bt * Bp, .04 + k * .022)); // 본곡 들어가기 전 필인
   }
 
+  // 메들리용 끝맺음: D단조 화음 + 벨 '띵'
+  if (ending){
+    const T = LEN, B = 60 / 96;
+    [50, 53, 57, 60, 64].forEach(m => ep(m, T, 8 * B, .7)); bass(38, T, 6 * B, .95); vib(74, T, 8 * B, .5);
+    kick(T, .45); crash(T, .05); bell(T, 1396.9, .6);
+  }
   const raw = await ctx.startRendering();
+  if (ending){
+    const n = raw.length, fin = Math.floor(sr * 1.2); let peak = 0;
+    for (let ch = 0; ch < 2; ch++){ const d = raw.getChannelData(ch); for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i])); }
+    const k = .85 / peak;
+    for (let ch = 0; ch < 2; ch++){ const d = raw.getChannelData(ch); for (let i = 0; i < n; i++){ let v = d[i] * k; if (i > n - fin) v *= (n - i) / fin; d[i] = v; } }
+    raw.loopStart = PRE; raw.loopEnd = n / sr; return raw;
+  }
   // 끝 잔향(TAIL)을 반복 시작 지점(PRE)에 겹쳐서, 반복될 때 소리가 뚝 끊기지 않게
   const n = Math.round(LEN * sr), p0 = Math.round(PRE * sr);
   const buf = new AudioBuffer({ length: n, numberOfChannels: 2, sampleRate: sr });

@@ -413,7 +413,7 @@ function renderLobby(){
   </div>
   <div class="mode" style="flex-direction:row;align-items:center">
     <label for="name-in" style="white-space:nowrap">내 이름</label>
-    <input id="name-in" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(me.name)}" autocomplete="nickname">
+    <input id="name-in" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(me.name)}" name="search_nick" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true" data-1p-ignore>
   </div>
   <div class="modes">
     <div class="mode">
@@ -447,7 +447,7 @@ function renderJoin(){
   </section>
   <form class="mode" id="join-form" novalidate>
     <label for="join-name"><b>내 이름</b> <span class="note">(최대 10자)</span></label>
-    <input id="join-name" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(ui.joinDraft ?? (store('holdem.name') || ''))}" placeholder="예: 영규" autocomplete="nickname" enterkeyhint="go">
+    <input id="join-name" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(ui.joinDraft ?? (store('holdem.name') || ''))}" placeholder="예: 영규" name="search_nick_join" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true" data-1p-ignore enterkeyhint="go">
     <button class="primary" type="submit">입장하기</button>
     <p class="note">이름은 이 기기에 저장돼서 다음에도 그대로 써요. 게임 중에도 바꿀 수 있어요.</p>
   </form>
@@ -663,7 +663,7 @@ const qchat = (()=>{
   const f = document.createElement('form');
   f.className = 'qchat'; f.id = 'qchat-form'; f.hidden = true; f.noValidate = true; f.autocomplete = 'off';
   f.innerHTML = `<button type="button" class="qchat-open" aria-label="채팅 입력하기"><span class="emo-t">💬</span><span>채팅</span></button>
-    <input id="qchat-in" maxlength="200" placeholder="메시지" enterkeyhint="send" aria-label="채팅 메시지">
+    <input id="qchat-in" name="search_qchat_msg" type="text" maxlength="200" placeholder="메시지" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true" data-1p-ignore enterkeyhint="send" aria-label="채팅 메시지">
     <button type="submit" class="qchat-send" aria-label="보내기">↑</button>`;
   document.body.appendChild(f);
   const inp = f.querySelector('input');
@@ -873,8 +873,8 @@ function renderDock(s, mi, now){
         <span class="note">${busy ? '이번 핸드가 끝나면 바꿀 수 있어요' : `지금 ${seated}명 앉아 있어요`}</span></div>`;
     }
     if (ui.renameOpen){
-      extra += `<form class="row" id="rename-form" novalidate>
-        <input id="rename-in" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(ui.renameDraft ?? (p.name || me.name))}" aria-label="새 이름" enterkeyhint="done">
+      extra += `<form class="row" id="rename-form" novalidate autocomplete="off">
+        <input id="rename-in" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(ui.renameDraft ?? (p.name || me.name))}" aria-label="새 이름" name="search_nick_new" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true" data-1p-ignore enterkeyhint="done">
         <button class="primary" type="submit">저장</button></form>`;
     }
   }
@@ -1410,8 +1410,8 @@ function audioReady(){
 }
 function toggleSound(){
   snd.on = !snd.on; store('holdem.sound', snd.on ? '1' : '0');
-  if (snd.on){ audioReady(); if (IS_IOS) melUnlock(); syncMusic(); sfx.tick(); }
-  else stopMusic();
+  if (snd.on){ audioReady(); melUnlock(); syncMusic(); sfx.tick(); }
+  else melStop(false);
   render();
 }
 const inGame = () => view === 'local' || view === 'online';
@@ -1422,82 +1422,71 @@ function masterTo(v, dur){
 function syncMusic(){
   if (snd.on && inGame() && !document.hidden){
     if (snd.ctx && snd.masterV !== 1) masterTo(1, .25);
-    startMusic();
-  } else { stopMusic(); if (!inGame()) snd.pos = 0; } // 새 게임에 들어오면 인트로부터
+    melStart();
+  } else melStop(!inGame());   // 처음 화면으로 나가면 다음 게임은 인트로부터
 }
-const MUSIC_URL = 'audio/lounge.mp3', LOOP_START = 4.2, LOOP_END = 79.3785; // 인트로(처음 한 번) + 32마디 반복 (96 → 114 → 96bpm)
-function musicPos(){
-  if (!(snd.ctx && snd.src)) return snd.pos || 0;
-  const e = snd.ctx.currentTime - snd.t0, end = snd.loopEnd || LOOP_END;
-  return e < end ? e : LOOP_START + (e - LOOP_START) % (end - LOOP_START);
-}
-// 아이폰·아이패드: 배경음악은 <audio>로 재생 (iOS에서 가장 안정적). 인트로 → 본곡 반복
-const IS_IOS = /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const mel = {intro: null, loop: null, stage: null, playing: false};
+// ---------- 배경음악: 인트로 → 6곡 메들리를 계속 이어서 재생 ----------
+// 모든 기기에서 <audio> 하나로 재생 (아이폰·아이패드에서 가장 안정적). 곡 파일은 미리 알맞은 음량으로 만들어 둠
+const MUSIC_INTRO = 'audio/lounge-intro.mp3';
+const PLAYLIST = [
+  {src:'audio/song1.mp3', title:'라운지 블러프'},
+  {src:'audio/song2.mp3', title:'하이 롤러'},
+  {src:'audio/song3.mp3', title:'올인'},
+  {src:'audio/song4.mp3', title:'새벽 3시'},
+  {src:'audio/song5.mp3', title:'잭팟'},
+  {src:'audio/song6.mp3', title:'리버 카드'},
+];
+const mel = {a: null, idx: -2, playing: false, unlocked: false};   // idx: -2 처음, -1 인트로, 0~ 곡 번호
 function melInit(){
-  if (mel.intro) return;
-  mel.intro = new Audio('audio/lounge-intro.mp3'); mel.loop = new Audio('audio/lounge-loop.mp3'); mel.loop.loop = true;
-  [mel.intro, mel.loop].forEach(a => { a.preload = 'auto'; a.setAttribute('playsinline', ''); a.setAttribute('webkit-playsinline', ''); });
-  mel.intro.addEventListener('ended', () => { if (mel.playing){ mel.stage = 'loop'; mel.loop.currentTime = 0; mel.loop.play().catch(()=>{ mel.playing = false; }); } });
+  if (mel.a) return;
+  const a = mel.a = new Audio(); a.preload = 'auto'; a.setAttribute('playsinline', ''); a.setAttribute('webkit-playsinline', '');
+  a.addEventListener('ended', () => melNext());
+  a.addEventListener('error', () => { if (mel.playing && mel.a.src) setTimeout(melNext, 800); });
 }
-// 터치하는 순간 두 오디오를 모두 '허락받은' 상태로 만들어 둠 (나중에 터치 없이도 이어서 재생되게)
+function melLoad(i){
+  mel.idx = i; const src = i < 0 ? MUSIC_INTRO : PLAYLIST[i].src;
+  mel.a.src = src;
+  const nx = PLAYLIST[(i + 1 + PLAYLIST.length) % PLAYLIST.length]; fetch(nx.src).catch(()=>{});   // 다음 곡 미리 받아 두기
+  try { if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: i < 0 ? '홀덤 테이블' : PLAYLIST[i].title, artist: '홀덤 테이블 배경음악'}); } catch(_){}
+}
+function melNext(){ if (!mel.a) return; melLoad((mel.idx + 1) % PLAYLIST.length); if (mel.playing) mel.a.play().catch(()=>{ mel.playing = false; }); }
+// 터치하는 순간 오디오를 '허락받은' 상태로 만들어 둠 (나중에 터치 없이도 다음 곡으로 넘어가게)
 function melUnlock(){
-  melInit(); if (mel.unlocked) return; mel.unlocked = true;
-  [mel.intro, mel.loop].forEach(a => { if (!a.paused) return; a.muted = true; const pr = a.play(); if (pr && pr.then) pr.then(() => { if (!(mel.playing && ((mel.stage === 'loop') === (a === mel.loop)))) a.pause(); a.muted = false; }).catch(() => { a.muted = false; mel.unlocked = false; }); else a.muted = false; });
+  melInit(); if (mel.unlocked || !mel.a.paused) return; mel.unlocked = true;
+  if (!mel.a.src) melLoad(-1);
+  const a = mel.a; a.muted = true; const pr = a.play();
+  if (pr && pr.then) pr.then(() => { if (!mel.playing) a.pause(); a.muted = false; }).catch(() => { a.muted = false; mel.unlocked = false; }); else a.muted = false;
 }
 function melStart(){
-  melInit(); if (mel.playing) return; mel.playing = true;
-  const a = mel.stage === 'loop' ? mel.loop : mel.intro; if (!mel.stage) { mel.stage = 'intro'; mel.intro.currentTime = 0; }
-  a.muted = false; const pr = a.play(); if (pr && pr.catch) pr.catch(() => { mel.playing = false; });
+  melInit(); if (mel.playing && !mel.a.paused) return; mel.playing = true;
+  if (mel.idx === -2 || !mel.a.src) melLoad(-1);
+  mel.a.muted = false; mel.a.volume = 1;
+  const pr = mel.a.play(); if (pr && pr.catch) pr.catch(() => { mel.playing = false; });
 }
 function melStop(reset){
-  if (!mel.intro) return; mel.playing = false; mel.intro.pause(); mel.loop.pause();
-  if (reset){ mel.stage = null; try { mel.intro.currentTime = 0; mel.loop.currentTime = 0; } catch(_){} }
+  if (!mel.a) return; mel.playing = false; mel.a.pause();
+  if (reset && mel.idx !== -2){ mel.idx = -2; try { mel.a.removeAttribute('src'); mel.a.load(); } catch(_){} }
 }
-function stopMusic(fast){
-  if (IS_IOS){ melStop(!inGame()); return; }
-  if (!snd.ctx || !snd.src) return;
-  snd.pos = musicPos();
-  const t = snd.ctx.currentTime, src = snd.src; snd.src = null;
-  const g = snd.music.gain; g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(0, t + (fast ? .05 : .4));
-  setTimeout(()=>{ try { src.stop(); } catch(_){} }, fast ? 70 : 450);
-}
-function loadMusic(ctx){
-  if (!snd.rendering) snd.rendering = fetch(MUSIC_URL).then(r=>{ if (!r.ok) throw 0; return r.arrayBuffer(); })
-    .then(ab=>new Promise((ok, no)=>{ const pr = ctx.decodeAudioData(ab, ok, no); if (pr && pr.then) pr.then(ok, no); }))
-    .then(b=>{ snd.buf = b; }).catch(()=>{ snd.rendering = null; });
-  return snd.rendering;
-}
-async function startMusic(){
-  if (IS_IOS){ audioReady(); melStart(); return; }
-  const ctx = audioReady(); if (!ctx || snd.src) return;
-  if (!snd.buf){ await loadMusic(ctx); }
-  if (!snd.buf || !snd.on || !inGame() || snd.src || document.hidden || ctx !== snd.ctx) return;
-  const src = ctx.createBufferSource(); src.buffer = snd.buf; src.loop = true;
-  const end = Math.min(LOOP_END, snd.buf.duration); src.loopStart = LOOP_START; src.loopEnd = end; snd.loopEnd = end;
-  src.connect(snd.music);
-  const t = ctx.currentTime, off = Math.min(snd.pos || 0, end - .01);
-  const g = snd.music.gain; g.cancelScheduledValues(t); g.setValueAtTime(0, t); g.linearRampToValueAtTime(.38, t + (off ? .8 : 1.5));
-  src.start(t, off); snd.src = src; snd.t0 = t - off;
-}
-// 다른 앱으로 갈 때: 소리를 먼저 아주 짧게 줄이고 음악을 멈춘 뒤 오디오를 재움 (끊기며 '지잉' 하는 소리 방지)
+function stopMusic(){ melStop(!inGame()); }
+function startMusic(){ audioReady(); melStart(); }
+// 다른 앱으로 갈 때: 효과음 오디오는 소리를 먼저 줄인 뒤 재우고(끊기며 '지잉' 하는 소리 방지), 음악은 일시정지
 function audioHide(){
-  if (IS_IOS) melStop(!inGame());
+  melStop(!inGame());
   if (!snd.ctx) return;
   masterTo(0, .05);
-  stopMusic(true);
   clearTimeout(snd.hideT); snd.hideT = setTimeout(()=>{ if (document.hidden && snd.ctx) snd.ctx.suspend().catch(()=>{}); }, 90);
 }
-// 돌아왔을 때: 오디오를 깨우고 멈췄던 자리부터 음악 이어서
-function audioShow(){ clearTimeout(snd.hideT); if (!snd.on || !snd.ctx) return; audioReady(); syncMusic(); }
+// 돌아왔을 때: 멈췄던 자리부터 음악 이어서
+function audioShow(){ clearTimeout(snd.hideT); if (!snd.on) return; if (snd.ctx) audioReady(); syncMusic(); }
 document.addEventListener('visibilitychange', ()=>{ if (document.hidden) audioHide(); else audioShow(); });
 window.addEventListener('pagehide', audioHide);
 window.addEventListener('pageshow', ()=>{ if (!document.hidden) audioShow(); });
-// 소리를 켜 둔 채로 다시 들어오거나 아이폰이 오디오를 안 깨워줬으면, 첫 터치 때 다시 시작 (브라우저 정책상 터치가 필요)
+// 소리를 켜 둔 채로 다시 들어오거나 기기가 오디오를 안 깨워줬으면, 첫 터치 때 다시 시작 (브라우저 정책상 터치가 필요)
 ['pointerdown','touchend','click','keydown'].forEach(ev=>document.addEventListener(ev, ()=>{
   if (!snd.on) return;
-  if (IS_IOS){ melUnlock(); if (!snd.ctx || snd.ctx.state !== 'running') audioReady(); if (inGame() && !mel.playing) syncMusic(); return; }
-  if (!snd.ctx || snd.ctx.state !== 'running' || !snd.src){ audioReady(); syncMusic(); }
+  melUnlock();
+  if (!snd.ctx || snd.ctx.state !== 'running') audioReady();
+  if (inGame() && (!mel.playing || mel.a.paused)) syncMusic();
 }, {capture: true, passive: true}));
 
 // 베팅 '치킹!' : 보내준 영상의 소리를 분석해서 같은 구조로 합성
