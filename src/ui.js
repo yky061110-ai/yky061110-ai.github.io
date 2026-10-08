@@ -115,6 +115,73 @@ function infoPopHTML(term){
   </div>`;
 }
 
+/* ---------- 이모티콘 호환 ----------
+   보낼 때는 이모티콘 글자 그대로 보내고, 받는 기기에서 그 기기 이모티콘으로 그림.
+   그 기기가 못 그리는 이모티콘(□로 깨지거나 쪼개짐)은 같은 이모티콘 그림(Twemoji)으로,
+   그림도 못 불러오면 비슷한 옛날 이모티콘으로 대신 보여줌. */
+const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji","Android Emoji","Twemoji Mozilla",sans-serif';
+const EMOJI_FALLBACK = {'🫵':'👉','😵‍💫':'😵','🪓':'🔨','🤲':'🙌','🤯':'😱','🤬':'😡','🤪':'😜','☠️':'💀','🖐️':'✋','🤝':'👍','💩':'😝','👺':'😈','🃏':'🎴'};
+const emojiOkCache = new Map();
+let emojiProbe = null;
+function emojiPixels(ch){
+  const {x} = emojiProbe; x.clearRect(0, 0, 40, 40); x.fillText(ch, 4, 4);
+  return x.getImageData(0, 0, 40, 40).data;
+}
+function emojiSupported(e){
+  if (emojiOkCache.has(e)) return emojiOkCache.get(e);
+  let ok = true;
+  try {
+    if (!emojiProbe){
+      const c = document.createElement('canvas'); c.width = c.height = 40;
+      const x = c.getContext('2d', {willReadFrequently:true});
+      x.font = `28px ${EMOJI_FONT}`; x.textBaseline = 'top'; x.fillStyle = '#000';
+      emojiProbe = {x, tofu: null, one: x.measureText('😀').width};
+      emojiProbe.tofu = emojiPixels('\u{10FFFD}');          // 이 기기가 "없는 글자"를 그리는 모양(□)
+    }
+    const {x, tofu, one} = emojiProbe;
+    if (x.measureText(e).width > one * 1.35) ok = false;   // 합성 이모티콘이 여러 개로 쪼개져 그려짐
+    else {
+      const d = emojiPixels(e); let ink = 0, same = true;
+      for (let i = 3; i < d.length; i += 4){ if (d[i] > 40) ink++; if (same && d[i] !== tofu[i]) same = false; }
+      ok = ink > 20 && !same;                               // 아무것도 안 그려지거나 □와 똑같으면 미지원
+    }
+  } catch(_){ ok = true; }
+  emojiOkCache.set(e, ok); return ok;
+}
+function twemojiURL(e){
+  const cps = [...e].map(ch=>ch.codePointAt(0));
+  const list = cps.includes(0x200d) ? cps : cps.filter(cp=>cp!==0xfe0f);
+  return `https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/svg/${list.map(cp=>cp.toString(16)).join('-')}.svg`;
+}
+// HTML 문자열로 (우리 목록에 있는 이모티콘 전용)
+function emojiHTML(e){
+  if (emojiSupported(e)) return `<span class="emo-t">${e}</span>`;
+  const fb = EMOJI_FALLBACK[e] || e;
+  return `<img class="emo-i" src="${twemojiURL(e)}" alt="${e}" draggable="false" onerror="this.outerHTML='<span class=&quot;emo-t&quot;>${fb}</span>'">`;
+}
+// 아무 글(채팅·말풍선)을 안전하게 그리면서 이모티콘만 골라 호환 처리
+const isEmojiGrapheme = g => /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(g) || /^[‼⁉♠-♧]️$/.test(g);
+function graphemes(str){
+  if (window.Intl && Intl.Segmenter) return [...new Intl.Segmenter('ko', {granularity:'grapheme'}).segment(str)].map(x=>x.segment);
+  return str.match(/\p{Extended_Pictographic}️?(?:‍\p{Extended_Pictographic}️?)*|[\s\S]/gu) || [];
+}
+function renderRich(el, text){
+  el.textContent = '';
+  let buf = '';
+  const flush = () => { if (buf){ el.appendChild(document.createTextNode(buf)); buf = ''; } };
+  for (const g of graphemes(String(text||''))){
+    if (!isEmojiGrapheme(g)){ buf += g; continue; }
+    flush();
+    if (emojiSupported(g)){ const sp = document.createElement('span'); sp.className = 'emo-t'; sp.textContent = g; el.appendChild(sp); }
+    else {
+      const img = document.createElement('img'); img.className = 'emo-i'; img.alt = g; img.draggable = false; img.src = twemojiURL(g);
+      img.onerror = () => { const sp = document.createElement('span'); sp.className = 'emo-t'; sp.textContent = EMOJI_FALLBACK[g] || g; img.replaceWith(sp); };
+      el.appendChild(img);
+    }
+  }
+  flush();
+}
+
 function cardHTML(c, opts={}){
   if (!c) return `<div class="card empty"></div>`;
   if (c==='back') return `<div class="card back">${BACK_SVG}</div>`;
@@ -430,7 +497,7 @@ function renderTable(){
   app.querySelectorAll('[data-nm]').forEach(el=>{ el.textContent = nameOf(s, +el.dataset.nm); });
   app.querySelectorAll('[data-li]').forEach(el=>{ el.textContent = logName(s, {i:+el.dataset.li, id:el.dataset.lid, n:el.dataset.ln}); });
   placeBets();
-  app.querySelectorAll('[data-bub]').forEach(el=>{ const b = ui.bubbles[el.dataset.bub]; if (b) el.textContent = b.text; });
+  app.querySelectorAll('[data-bub]').forEach(el=>{ const b = ui.bubbles[el.dataset.bub]; if (b) renderRich(el, b.text); });
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
   tickTimers();
@@ -440,8 +507,8 @@ function renderTable(){
 
 // 내 자리 왼쪽: 이모티콘 3개 + 더보기(+) / 오른쪽: 내 칩 종류별 더미
 function mySideHTML(s, p){
-  const quick = EMOJIS.slice(0, 3).map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('');
-  const all = ui.emoOpen ? `<div class="emo-all" role="listbox" aria-label="이모티콘 전체">${EMOJIS.map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('')}</div>` : '';
+  const quick = EMOJIS.slice(0, 3).map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${emojiHTML(e)}</button>`).join('');
+  const all = ui.emoOpen ? `<div class="emo-all" role="listbox" aria-label="이모티콘 전체">${EMOJIS.map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${emojiHTML(e)}</button>`).join('')}</div>` : '';
   return `<div class="emostrip">${quick}<button class="more${ui.emoOpen?' on':''}" data-a="emo-toggle" aria-label="이모티콘 전체 보기" aria-expanded="${!!ui.emoOpen}">${ui.emoOpen?'×':'+'}</button></div>${all}
     <div class="mytray" aria-label="내 칩">${chipTray(p.chips, s.startChips||START_CHIPS, p.id)}</div>`;
 }
@@ -756,14 +823,14 @@ function renderChat(scroll){
   net.chat.forEach(m=>{
     const li = document.createElement('li'); if (m.pid===me.pid) li.className = 'mine';
     const who = document.createElement('span'); who.className = 'who'; who.textContent = m.pid===me.pid ? '나' : m.n;
-    const tx = document.createElement('span'); tx.textContent = m.text;
+    const tx = document.createElement('span'); renderRich(tx, m.text);
     li.append(who, tx); list.appendChild(li);
   });
   if (scroll) list.scrollTop = list.scrollHeight;
 }
 function toggleEmojiPad(force){
   const pad = document.getElementById('emoji-pad'), btn = document.getElementById('emoji-btn');
-  if (!pad.childElementCount) pad.innerHTML = EMOJIS.map(e=>`<button type="button" data-emo="${e}" aria-label="${e}">${e}</button>`).join('');
+  if (!pad.childElementCount) pad.innerHTML = EMOJIS.map(e=>`<button type="button" data-emo="${e}" aria-label="${e}">${emojiHTML(e)}</button>`).join('');
   const open = force!==undefined ? force : pad.hidden;
   pad.hidden = !open; btn.setAttribute('aria-expanded', String(open));
 }
