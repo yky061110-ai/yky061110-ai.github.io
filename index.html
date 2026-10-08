@@ -637,7 +637,7 @@ let view = 'lobby', botCount = 3;
 let hostSeats = Math.max(2, Math.min(9, parseInt(store('holdem.seats')) || 6));
 const LEVELS = {
   easy:   {name:'이지',  desc:'자주 따라오고 블러핑 없음'},
-  normal: {name:'보통',  desc:'무난한 실력'},
+  normal: {name:'노멀',  desc:'무난한 실력'},
   hard:   {name:'하드',  desc:'계산 정확, 블러핑도 함'},
 };
 let botLevel = LEVELS[store('holdem.level')] ? store('holdem.level') : 'normal';
