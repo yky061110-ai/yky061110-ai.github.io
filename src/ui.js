@@ -1,4 +1,5 @@
 /* ================= 화면 ================= */
+try { if (navigator.standalone) document.documentElement.classList.add('ios-app'); } catch(_){}
 const app = document.getElementById('app');
 const fmt = n => '$' + Number(n||0).toLocaleString('en-US');   // 칩 금액은 달러로 표시
 const esc = t => String(t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -293,14 +294,15 @@ function cardHTML(c, opts={}){
   if (c==='back') return `<div class="card back">${BACK_SVG}</div>`;
   const key = (opts.key||'') + c;
   const fresh = opts.animate && !ui.seenCards.has(key); if (opts.animate) ui.seenCards.add(key);
+  const dl = fresh && opts.delay ? ` style="--d:${opts.delay|0}ms"` : '';
   const label = `${RANK_TXT(c[0])} ${({s:'스페이드',h:'하트',d:'다이아',c:'클로버'})[c[1]]}`;
   if (!opts.mini && COURT_IMG(c[0])){
     const key = c[0] + c[1].toUpperCase(), src = `cards/${key}.webp`;
     // 이미 준비된 그림이면 예비 그림 없이 바로(동기 디코딩) 그려서 깜빡임이 없게
-    if (courtReady(key)) return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}"><span class="face-slot" data-face="${key}"></span></div>`;
-    return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}">${cardSVG(c, opts.mini)}<img class="face" src="${src}" alt="" draggable="false" decoding="sync" onerror="this.remove()"></div>`;
+    if (courtReady(key)) return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}"${dl} role="img" aria-label="${label}"><span class="face-slot" data-face="${key}"></span></div>`;
+    return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}"${dl} role="img" aria-label="${label}">${cardSVG(c, opts.mini)}<img class="face" src="${src}" alt="" draggable="false" decoding="sync" onerror="this.remove()"></div>`;
   }
-  return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}" role="img" aria-label="${label}">${cardSVG(c, opts.mini)}</div>`;
+  return `<div class="card${opts.hl?' hl':''}${opts.dim?' dim':''}${fresh?' new':''}"${dl} role="img" aria-label="${label}">${cardSVG(c, opts.mini)}</div>`;
 }
 
 /* ---------- 카지노 칩 ---------- */
@@ -551,7 +553,7 @@ function renderTable(){
   const winCards = new Set();
   if (showAll) s.winners.forEach(w=>{ const b = best(s.seats[w.s].cards.concat(s.board)); b && b.cards.forEach(c=>winCards.add(c)); });
 
-  let seatsHTML = '', chips = '';
+  let seatsHTML = '', chips = '', revealN = 0;
   const N = s.seats.length;
   for (let i=0;i<N;i++){
     const slot = (i - base + N) % N; const [x,y] = slotPos(slot, N);
@@ -567,7 +569,8 @@ function renderTable(){
     let hole = '';
     const opened = s.stage==='done' && p.shown && p.cards.length===2 && p.cards[0] !== 'back';
     if (!isMe && p.inHand && (!p.folded || opened)){
-      hole = p.cards.map(c=>opened ? cardHTML(c,{mini:true, hl:showAll&&winSet.has(i)&&winCards.has(c), dim: p.folded || (winSet.size && !winSet.has(i))}) : cardHTML('back')).join('');
+      const ord = opened ? revealN++ : 0;   // 판이 끝나면 차례로 '뒤집기'
+      hole = p.cards.map((c,k)=>opened ? cardHTML(c,{mini:true, animate:true, key:'sd'+s.handNo+':'+i+':', delay: 120 + ord*160 + k*60, hl:showAll&&winSet.has(i)&&winCards.has(c), dim: p.folded || (winSet.size && !winSet.has(i))}) : cardHTML('back')).join('');
     }
     let st = '';
     if (s.stage==='done' && winSet.has(i)) st = `+${fmt(s.winners.find(w=>w.s===i).amt)}`;
@@ -581,12 +584,12 @@ function renderTable(){
     const badge = s.stage!=='idle' && i===s.dealer ? '<span class="badge">D</span>' : '';
     const timer = acting && view==='online' ? `<div class="timer"><i data-deadline="${s.turnDeadline}"></i></div>` : '';
     const bub = ui.bubbles[p.id] && ui.bubbles[p.id].until > now ? `<div class="bubble${ui.bubbles[p.id].emo?' emo':''}${y < 30 ? ' below' : ''}" data-bub="${esc(p.id)}"></div>` : '';
-    seatsHTML += `<div class="${cls}" style="left:${x}%;top:${y}%">${bub}
+    seatsHTML += `<div class="${cls}" data-si="${i}" style="left:${x}%;top:${y}%">${bub}
       ${isMe ? '' : `<div class="hole">${hole}</div>`}
       <div class="plate">${badge}<span class="nm" data-nm="${i}"></span><span class="ch num">${p.chips>0?chipOne(chipParts(p.chips)[0][0]):""}${fmt(p.chips)}</span>${st?`<span class="st">${esc(st)}</span>`:''}</div>${timer}</div>`;
     if (p.bet>0){ const [bx, by] = betPos(x, y, N>=7); chips += `<div class="betchip" data-x="${x}" data-y="${y}" style="left:${bx}%;top:${by}%">${chipStack(p.bet,{cols:2,maxPer:5})}<span class="amt num">${fmt(p.bet)}</span></div>`; }
   }
-  const boardHTML = Array.from({length:5},(_,k)=>cardHTML(s.board[k], {animate:true, key:s.handNo+':', hl: showAll && winCards.has(s.board[k])})).join('');
+  const boardHTML = Array.from({length:5},(_,k)=>cardHTML(s.board[k], {animate:true, key:s.handNo+':', delay: 60 + (k<3 ? k*150 : 0), hl: showAll && winCards.has(s.board[k])})).join('');
   let result = '';
   if (s.stage==='done' && s.winners.length){
     result = s.winners.map(w=>`<span data-nm="${w.s}"></span> ${s.uncontested ? '승리' : '· ' + esc(w.h)}`).join(' / ');
@@ -952,7 +955,7 @@ function scheduleLocal(){
       const a = botDecide(localState, who);
       localState = act(localState, who, a, Date.now()) || act(localState, who, {type:'call'}, Date.now()) || act(localState, who, {type:'fold'}, Date.now());
       afterLocal();
-    }, 650 + Math.random()*650);
+    }, 650 + Math.random()*650 + Math.max(0, (ui.dealUntil||0) - performance.now()));
   }
 }
 function nextLocalHand(){ if (view!=='local' || localState.stage!=='done' || localGameOver(localState)) return; localState = startHand(localState, Date.now()); afterLocal(); }
@@ -1518,9 +1521,13 @@ const sfx = (()=>{
     // 폴드: 카드를 테이블에 미끄러뜨림
     fold(){ if (!ok()) return; hiss(snd.ctx.currentTime + .01, .22, 'bandpass', 1500, .9, .22, .07, 4200); },
     // 카드 한 장 넘기기
-    card(delay = 0){ if (!ok()) return; const t = snd.ctx.currentTime + .01 + delay; hiss(t, .05, 'highpass', 2800, .7, .3, .018); tone(1900, t, .04, .01); },
+    // 카드 나눠주기: 종이가 펠트 위를 미끄러지는 '스윽' + 내려앉는 '탁'
+    card(delay = 0){ if (!ok()) return; const t = snd.ctx.currentTime + .01 + delay; hiss(t, .09, 'bandpass', 1300, .9, .16, .03, 3600); hiss(t + .07, .03, 'lowpass', 1100, .7, .13, .01); tone(240, t + .07, .05, .02); },
+    // 카드 뒤집기: 짧은 '착'
+    flip(delay = 0){ if (!ok()) return; const t = snd.ctx.currentTime + .01 + delay; hiss(t, .025, 'highpass', 2200, .7, .26, .006); hiss(t + .004, .05, 'bandpass', 1600, 1.1, .1, .015, 2600); tone(520, t, .03, .012); },
+    // 카드 섞기: 리플 셔플 '드르륵'
+    shuffle(){ if (!ok()) return; const t = snd.ctx.currentTime + .01; for (let k = 0; k < 16; k++) hiss(t + k * .026 + Math.random() * .008, .02, 'bandpass', 2600 + Math.random() * 1800, .9, .05 + .06 * Math.sin(k / 15 * Math.PI), .004); hiss(t + .43, .05, 'lowpass', 900, .7, .14, .015); },
     // 새 판: 셔플 + 카드 나눠주기
-    deal(){ if (!ok()) return; const t = snd.ctx.currentTime; for (let k = 0; k < 7; k++) hiss(t + k * .03, .03, 'bandpass', 3000 + Math.random() * 1500, .8, .1, .012); for (let k = 0; k < 4; k++) this.card(.3 + k * .11); },
     // 차례가 넘어감: 작은 우드블록 '톡'
     tick(){ if (!ok()) return; const t = snd.ctx.currentTime + .01; tone(1250, t, .12, .025); tone(2500, t, .03, .01); },
     // 내 차례: 비브라폰 두 음 '띵-동'
@@ -1544,7 +1551,7 @@ function soundCues(s){
   fresh.forEach((e, n) => {
     const m = e.m || '', delay = n * 120;
     const play = fn => { played = true; setTimeout(fn, delay); };
-    if (/번째 핸드/.test(m)) play(() => sfx.deal());
+    if (/번째 핸드/.test(m)) play(() => sfx.shuffle());
     else if (/획득/.test(m)) play(() => sfx.win(e.i === mi));
     else if (/올인/.test(m)) play(() => sfx.allin());
     else if (/^폴드/.test(m)) play(() => sfx.fold());
@@ -1552,7 +1559,12 @@ function soundCues(s){
     else if (/^콜/.test(m)) play(() => sfx.call());
     else if (/^(베팅|레이즈)/.test(m)) play(() => sfx.bet());
   });
-  if (cur.hand === prev.hand && cur.board > prev.board){ for (let k = 0; k < cur.board - prev.board; k++) setTimeout(() => sfx.card(), 260 + k * 130); played = true; }
+  if (cur.hand === prev.hand && cur.board > prev.board){ for (let k = 0; k < cur.board - prev.board; k++) sfx.flip((60 + 150*k + 180) / 1000); played = true; }
+  // 판이 끝나 카드가 공개될 때 차례로 뒤집는 소리
+  if (cur.hand === prev.hand && cur.stage === 'done' && prev.stage !== 'done'){
+    const n = s.seats.filter((q, j) => q && j !== mi && q.inHand && q.shown && q.cards.length === 2 && q.cards[0] !== 'back').length;
+    for (let k = 0; k < n; k++) sfx.flip((120 + k * 160 + 200) / 1000);
+  }
   if (cur.toAct !== prev.toAct && cur.toAct >= 0){
     if (cur.toAct !== mi && !played) sfx.tick();
   }
@@ -1565,6 +1577,58 @@ function fitRaiseBox(){
   const vh = window.visualViewport ? window.visualViewport.height : innerHeight;
   if (r.bottom > vh - 8){ const dy = Math.min(r.bottom - vh + 12, Math.max(0, top - 8)); window.scrollBy({top: dy, behavior: 'smooth'}); }
 }
+// ---------- 카드 나눠주기 애니메이션 ----------
+// 새 핸드가 시작되면 테이블 가운데에서 딜러 왼쪽부터 한 장씩, 두 바퀴 날아감 (내 카드는 도착한 뒤 뒤집힘)
+const DEAL_STEP = 110, DEAL_DUR = 300;
+function dealTarget(s, seat, round){
+  const mi = s.seats.findIndex(p=>p && p.id===myId());
+  if (seat === mi) return document.querySelectorAll('.dock .mine .hole .card')[round] || null;
+  return document.querySelector(`.seat[data-si="${seat}"] .hole .card:nth-child(${round+1})`);
+}
+function startDealAnim(s){
+  if (!s || s.stage !== 'preflop' || !inGame()) return;
+  const id = view + ':' + (net.room||'') + ':' + s.handNo;
+  if (ui.dealId === id) return;
+  ui.dealId = id;
+  // 이미 진행 중인 판에 들어온 경우(누가 액션함)는 생략
+  if (s.seats.some(p=>p && (p.vp || (p.ag && p.ag.preflop)))) return;
+  const live = idxs(s, p=>p.inHand), order = [];
+  let i = s.dealer; for (let r = 0; r < 2; r++) for (let k = 0; k < live.length; k++){ i = nextIdx(s, i, p=>p.inHand); order.push([i, r]); }
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const t0 = performance.now();
+  ui.dealPlan = order.map(([seat, r], n) => ({seat, r, at: t0 + n * DEAL_STEP + DEAL_DUR}));
+  ui.dealUntil = t0 + order.length * DEAL_STEP + DEAL_DUR;
+  // 내 카드: 도착하는 순간 뒤집히도록 애니메이션 지연
+  const mi = s.seats.findIndex(p=>p && p.id===myId());
+  ui.dealPlan.forEach(it => { if (it.seat === mi){ const el = dealTarget(s, it.seat, it.r); if (el && el.classList.contains('new')) el.style.setProperty('--d', Math.round(it.at - t0) + 'ms'); } });
+  applyDealHidden();
+  order.forEach(([seat, r], n) => setTimeout(() => flyCard(seat, r, n), n * DEAL_STEP));
+}
+function flyCard(seat, r, n){
+  const s = currentState(); if (!s || !ui.dealPlan) return;
+  const tgt = dealTarget(s, seat, r), from = document.querySelector('.table .board');
+  if (!tgt || !from) return;
+  const a = tgt.getBoundingClientRect(), b = from.getBoundingClientRect();
+  if (!a.width) return;
+  const f = document.createElement('div'); f.className = 'card back fly'; f.innerHTML = BACK_SVG;
+  f.style.cssText = `position:fixed;left:${a.left}px;top:${a.top}px;width:${a.width}px;height:${a.height}px;z-index:15;pointer-events:none;margin:0`;
+  document.body.appendChild(f);
+  const dx = b.left + b.width/2 - (a.left + a.width/2), dy = b.top + b.height/2 - (a.top + a.height/2);
+  const rot = (n % 2 ? 1 : -1) * (12 + Math.random()*10);
+  sfx.card();
+  const done = () => { f.remove(); const s2 = currentState(), el = s2 && dealTarget(s2, seat, r); if (el) el.style.visibility = ''; };
+  if (!f.animate){ done(); return; }
+  const an = f.animate([{transform:`translate(${dx}px,${dy}px) rotate(${rot}deg) scale(.55)`, opacity:0}, {opacity:1, offset:.12}, {transform:'none', opacity:1}], {duration: DEAL_DUR, easing:'cubic-bezier(.2,.75,.3,1)'});
+  an.onfinish = done; an.oncancel = done;
+}
+// 다시 그려도 아직 도착 안 한 카드는 숨겨 둠
+function applyDealHidden(){
+  if (!ui.dealPlan) return;
+  const now = performance.now(), s = currentState();
+  if (!s || now > ui.dealUntil + 50){ ui.dealPlan = null; return; }
+  ui.dealPlan.forEach(it => { if (it.at > now){ const el = dealTarget(s, it.seat, it.r); if (el) el.style.visibility = 'hidden'; } });
+}
+
 function render(){
   const ae = document.activeElement; ui.raiseFocus = !!(ae && ae.id === 'raise-in'); ui.raiseKeep = ui.raiseFocus ? ae.value : null;
   document.body.classList.toggle('wide-table', (view==='local' || view==='online') && isWide());
@@ -1572,6 +1636,8 @@ function render(){
   mountFaces(app);
   if (view==='lobby' || view==='join') placeQuickChat();
   const box = document.getElementById('chatbox'); if (box && box.hidden === (view==='online' && !!net.state)) renderChat(true);
+  applyDealHidden();
+  if (inGame()) startDealAnim(currentState());
   soundCues(inGame() ? currentState() : null);
   if (snd.ctx) syncMusic();
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
