@@ -619,6 +619,73 @@ function inviteBox(s){
   return `<div class="tablecode">초대 링크 <span class="num" id="invite-url" style="font-size:12px;letter-spacing:0;word-break:break-all;min-width:0">${esc(inviteLink())}</span><button class="ghost" data-a="invite">보내기</button></div>`;
 }
 
+/* ---------- 추천플레이 (초보자용, 플랍·턴·리버) ---------- */
+ui.adviceOpen = store('holdem.advice') === '1';
+const adviceCache = new Map();
+// 다음 카드로 족보가 좋아질 확률(정확히 계산)과 아웃츠
+function improveInfo(hole, board){
+  if (board.length >= 5) return null;
+  const cur = best(hole.concat(board)).cat;
+  const used = new Set(hole.concat(board)), rest = FULL.filter(c=>!used.has(c));
+  const outs = {};
+  for (const c of rest){ const k = best(hole.concat(board, [c])).cat; if (k > cur) outs[k] = (outs[k]||0) + 1; }
+  let better = 0, total = 0;
+  if (board.length === 3){            // 턴+리버 두 장을 모두 따져서 리버까지 좋아질 확률
+    for (let i=0;i<rest.length;i++) for (let j=i+1;j<rest.length;j++){ total++; if (best(hole.concat(board, [rest[i], rest[j]])).cat > cur) better++; }
+  } else { total = rest.length; better = Object.values(outs).reduce((a,b)=>a+b, 0); }
+  const list = Object.entries(outs).map(([k,n])=>[+k, n]).sort((a,b)=>b[0]-a[0]);
+  return {p: better/total, outs: list, nextCards: rest.length};
+}
+function adviceFor(s, mi){
+  const p = s.seats[mi], L = legal(s, mi);
+  const opp = idxs(s, (q,i)=>i!==mi && q.inHand && !q.folded).length;
+  const key = [p.cards.join(''), s.board.join(''), opp].join('|');
+  let a = adviceCache.get(key);
+  if (!a){
+    const eq = opp ? equity(p.cards, s.board, opp, 500) : 1;
+    a = {eq, opp, imp: improveInfo(p.cards, s.board), cat: best(p.cards.concat(s.board)).cat};
+    adviceCache.set(key, a); if (adviceCache.size > 40) adviceCache.delete(adviceCache.keys().next().value);
+  }
+  const pot = potSize(s), call = L.callAmt, need = call > 0 ? call / (pot + call) : 0;
+  const pct = x => (x*100 >= 10 ? Math.round(x*100) : (x*100).toFixed(1)) + '%';
+  const draw = a.imp && a.imp.p >= .3;
+  const bbAmt = s.bb || BB, round = v => Math.max(bbAmt, Math.round(v / 10) * 10);
+  let act, why, tone;
+  if (L.canCheck){
+    if (a.eq >= .65){ act = `베팅 ${fmt(round(pot*.6))}`; tone='bet'; why = `이길 확률이 ${pct(a.eq)}로 높아요. 팟의 절반~¾ 정도 베팅해서 칩을 더 받아내세요.`; }
+    else if (a.eq >= .48){ act = `작게 베팅 ${fmt(round(pot*.35))}`; tone='bet'; why = `괜찮은 패예요(이길 확률 ${pct(a.eq)}). 팟의 ⅓ 정도로 작게 베팅하거나 체크해도 좋아요.`; }
+    else if (draw){ act = '체크'; tone='check'; why = `지금은 약하지만 ${s.board.length===3?'리버까지':'다음 카드에서'} 족보가 좋아질 확률이 ${pct(a.imp.p)}예요. 공짜로 다음 카드를 보세요.`; }
+    else { act = '체크'; tone='check'; why = `아직 약한 패예요(이길 확률 ${pct(a.eq)}). 공짜면 체크하고, 상대가 크게 베팅하면 접는 게 좋아요.`; }
+  } else {
+    if (a.eq >= .7 && L.canRaise){ act = '레이즈'; tone='bet'; why = `이길 확률 ${pct(a.eq)}로 아주 강해요. 레이즈해서 팟을 키우세요.`; }
+    else if (a.eq >= need + .05){ act = `콜 ${fmt(call)}`; tone='call'; why = `이길 확률 ${pct(a.eq)}가 콜에 필요한 승률 ${pct(need)}보다 높아서, 길게 보면 이득이에요.`; }
+    else if (draw && s.board.length < 5 && a.eq >= need - .04){ act = `콜 ${fmt(call)}`; tone='call'; why = `지금 승률(${pct(a.eq)})은 필요한 만큼(${pct(need)})에 조금 못 미치지만, 좋아질 확률이 ${pct(a.imp.p)}라 콜해볼 만해요.`; }
+    else { act = '폴드'; tone='fold'; why = `이길 확률 ${pct(a.eq)}로는 ${fmt(call)}을 내기엔 손해예요(필요한 승률 ${pct(need)}). 접고 다음 판을 노리세요.`; }
+  }
+  return {...a, act, why, tone, need, call, pct};
+}
+function adviceHTML(s, mi){
+  const p = s.seats[mi];
+  if (!s.board.length || !BETTING.has(s.stage) || !p.inHand || p.folded || p.allin) return '';
+  const street = {3:'플랍', 4:'턴', 5:'리버'}[s.board.length];
+  const head = `<button class="adv-toggle${ui.adviceOpen?' on':''}" data-a="advice" aria-expanded="${!!ui.adviceOpen}"><span class="emo-t">💡</span> 추천플레이 <span class="adv-street">${street}</span><span class="adv-caret">${ui.adviceOpen?'▴':'▾'}</span></button>`;
+  if (!ui.adviceOpen) return `<div class="advice">${head}</div>`;
+  const a = adviceFor(s, mi);
+  const mine = s.toAct === mi;
+  const eqW = Math.round(a.eq*100), needL = Math.round(a.need*100);
+  const outs = a.imp && a.imp.outs.length ? `<div class="adv-row"><span>다음 카드 한 장으로 될 수 있는 족보</span><b>${a.imp.outs.slice(0,3).map(([k,n])=>`${HAND[k]==='스트레이트 플러시' ? '스트레이트 플러시' : HAND[k]} ${n}장`).join(' · ')}</b> <span class="adv-sub">(남은 ${a.imp.nextCards}장 중)</span></div>` : '';
+  const imp = a.imp ? `<div class="adv-row"><span>${s.board.length===3 ? '리버까지 족보가 좋아질 확률' : '리버에서 족보가 좋아질 확률'}</span><b>${a.pct(a.imp.p)}</b></div>` : '';
+  return `<div class="advice open">${head}
+    <div class="adv-body">
+      <div class="adv-rec ${a.tone}"><span class="adv-label">${mine ? '추천' : '내 차례가 오면'}</span><b>${a.act}</b></div>
+      <p class="adv-why">${a.why}</p>
+      <div class="adv-bar" aria-label="이길 확률 ${eqW}%"><i style="width:${eqW}%"></i>${a.call>0 ? `<em style="left:${needL}%" title="필요한 승률"></em>` : ''}</div>
+      <div class="adv-legend"><span>이길 확률 <b>${a.pct(a.eq)}</b> (상대 ${a.opp}명)</span>${a.call>0 ? `<span><em></em>콜에 필요한 승률 <b>${a.pct(a.need)}</b></span>` : ''}</div>
+      ${imp}${outs}
+      <p class="adv-note">상대 패를 모른다고 보고 계산한 참고용 확률이에요.</p>
+    </div></div>`;
+}
+
 function renderDock(s, mi, now){
   if (mi<0){
     const full = s.seats.every(Boolean);
@@ -700,7 +767,7 @@ function renderDock(s, mi, now){
     }
   }
   const pop = ui.infoOpen && HAND_INFO[handTxt] ? infoPopHTML(handTxt) : '';
-  return `<div class="dock">${pop}${mine}${controls}${extra}${inviteBox(s)}</div>`;
+  return `<div class="dock">${pop}${mine}${adviceHTML(s, mi)}${controls}${extra}${inviteBox(s)}</div>`;
 }
 
 function localGameOver(s){
@@ -1247,6 +1314,7 @@ document.addEventListener('click', async e=>{
     case 'preset': ui.raiseTo = +el.dataset.v; ui.raiseOpen = true; render(); break;
     case 'raise-go': doAction({type:'raise', to:ui.raiseTo}); break;
     case 'info': ui.infoOpen = !ui.infoOpen; render(); break;
+    case 'advice': ui.adviceOpen = !ui.adviceOpen; store('holdem.advice', ui.adviceOpen ? '1' : '0'); render(); break;
     case 'info-close': ui.infoOpen = false; render(); break;
     case 'emo-toggle': ui.emoOpen = !ui.emoOpen; render(); break;
     case 'emo-send': sendEmoji(el.dataset.v); break;
