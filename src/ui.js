@@ -3,6 +3,7 @@ const app = document.getElementById('app');
 const fmt = n => Number(n||0).toLocaleString('ko-KR');
 const esc = t => String(t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let view = 'lobby', botCount = 3;
+let hostSeats = Math.max(2, Math.min(9, parseInt(store('holdem.seats')) || 6));
 let localState = null, localTimer = null;
 let ui = {raiseOpen:false, raiseTo:0, raiseKey:'', seenCards:new Set(), bubbles:{}};
 
@@ -61,7 +62,8 @@ function renderLobby(){
     </div>
     <div class="mode">
       <h3>친구와 온라인</h3>
-      <p>방을 만들고 초대 링크를 보내세요. 링크를 연 친구는 코드 없이 바로 자리에 앉아요. 최대 6명.</p>
+      <p>방을 만들고 초대 링크를 보내세요. 링크를 연 친구는 이름만 정하면 바로 자리에 앉아요. 인원은 2~9명 중에서 정하고, 게임 중에도 바꿀 수 있어요.</p>
+      <div class="stepper"><button data-a="hseats-" aria-label="최대 인원 줄이기" ${hostSeats<=MIN_SEATS?'disabled':''}>−</button><span class="num">${hostSeats}</span><span>명까지 참여</span><button data-a="hseats+" aria-label="최대 인원 늘리기" ${hostSeats>=MAX_SEATS?'disabled':''}>+</button></div>
       <button class="primary" data-a="host" ${peerOk?'':'disabled'}>방 만들기</button>
       <p class="note ${peerOk?'':'warn'}">${peerOk ? '방을 만든 사람의 기기가 딜러 역할을 해요. 게임 중에는 이 페이지를 닫지 마세요.' : '온라인 연결 모듈을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요.'}</p>
     </div>
@@ -107,7 +109,8 @@ function saveRename(){
 }
 
 /* ---------- 테이블 ---------- */
-const SLOT = [[50,90],[13,69],[13,29],[50,9],[87,29],[87,69]];
+// 자리 위치: 내 자리(0)를 맨 아래에 두고 인원수만큼 타원 위에 시계 방향으로 배치
+function slotPos(k, N){ const a = Math.PI/2 + k*2*Math.PI/N; return [50 + 37*Math.cos(a), 49 + 41*Math.sin(a)]; }
 function currentState(){ return view==='local' ? localState : net.state; }
 function renderTable(){
   const s = currentState();
@@ -127,8 +130,9 @@ function renderTable(){
   if (showAll) s.winners.forEach(w=>{ const b = best(s.seats[w.s].cards.concat(s.board)); b && b.cards.forEach(c=>winCards.add(c)); });
 
   let seatsHTML = '', chips = '';
-  for (let i=0;i<SEATS;i++){
-    const slot = (i - base + SEATS) % SEATS; const [x,y] = SLOT[slot];
+  const N = s.seats.length;
+  for (let i=0;i<N;i++){
+    const slot = (i - base + N) % N; const [x,y] = slotPos(slot, N);
     const p = s.seats[i];
     if (!p){
       if (view==='local') continue;
@@ -168,7 +172,7 @@ function renderTable(){
   const pot = s.stage==='done' ? s.winners.reduce((a,w)=>a+w.amt,0) : potSize(s);
 
   app.innerHTML = `${head}${statusLine}
-  <div class="table">
+  <div class="table${N>=7?' dense':''}">
     <div class="felt"></div>
     <div class="center">
       <span class="stage">${STAGE_KO[s.stage]||''}${s.handNo?` · #${s.handNo}`:''}</span>
@@ -267,6 +271,12 @@ function renderDock(s, mi, now){
     btns.push(`<button class="ghost" data-a="rename-open">이름 변경</button>`);
     if (net.role!=='host') btns.push(`<button class="ghost" data-a="stand">자리에서 일어나기</button>`);
     extra = `<div class="row">${btns.join('')}</div>`;
+    if (net.role==='host'){
+      const N = s.seats.length, seated = s.seats.filter(Boolean).length, busy = BETTING.has(s.stage);
+      extra += `<div class="seatsize"><span>최대 인원</span>
+        <div class="stepper"><button data-a="seats-" aria-label="인원 줄이기" ${busy||N<=Math.max(MIN_SEATS,seated)?'disabled':''}>−</button><span class="num">${N}</span><span>명</span><button data-a="seats+" aria-label="인원 늘리기" ${busy||N>=MAX_SEATS?'disabled':''}>+</button></div>
+        <span class="note">${busy ? '이번 핸드가 끝나면 바꿀 수 있어요' : `지금 ${seated}명 앉아 있어요`}</span></div>`;
+    }
     if (ui.renameOpen){
       extra += `<form class="row" id="rename-form" novalidate>
         <input id="rename-in" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(ui.renameDraft ?? (p.name || me.name))}" aria-label="새 이름" enterkeyhint="done">
@@ -434,7 +444,7 @@ function hostRoom(){
   render();
   net.peer.on('open', pid=>{
     net.hostId = pid; setRoomURL(pid);
-    const s = emptyTable(); s.seats[0] = makeSeat(me.pid, {name: me.name}); logIt(s, 0, '방을 열었어요');
+    const s = emptyTable(hostSeats); s.seats[0] = makeSeat(me.pid, {name: me.name}); logIt(s, 0, `방을 열었어요 (최대 ${hostSeats}명)`);
     net.hostState = s; net.status = '';
     hostBroadcast();
   });
@@ -478,7 +488,8 @@ function hostApply(pid, name, d){
   let n = null;
   switch (d.t){
     case 'act': if (i>=0 && d.a && ['fold','check','call','raise'].includes(d.a.type)) n = act(s, i, {type:d.a.type, to:+d.a.to||0}, now); break;
-    case 'sit': { const k = +d.seat; if (i<0 && k>=0 && k<SEATS && !s.seats[k]){ n = clone(s); n.seats[k] = makeSeat(pid, {name}); logIt(n, k, '착석'); } break; }
+    case 'sit': { const k = +d.seat; if (i<0 && k>=0 && k<s.seats.length && !s.seats[k]){ n = clone(s); n.seats[k] = makeSeat(pid, {name}); logIt(n, k, '착석'); } break; }
+    case 'resize': if (pid===me.pid && net.role==='host'){ n = resizeTable(s, +d.n); if (!n) toast(`지금 앉아 있는 ${s.seats.filter(Boolean).length}명보다 적게 줄일 수 없어요.`); } break;
     case 'stand': n = standState(s, i, now); break;
     case 'sitback': if (i>=0){ n = clone(s); n.seats[i].sitOut = false; } break;
     case 'rebuy': if (i>=0){ const p = s.seats[i]; if (p.chips===0 && !(p.inHand && BETTING.has(s.stage))){ n = clone(s); n.seats[i].chips = START_CHIPS; n.seats[i].sitOut = false; logIt(n, i, `${fmt(START_CHIPS)}칩 리바이`); } } break;
@@ -487,13 +498,29 @@ function hostApply(pid, name, d){
   }
   if (n){ net.hostState = n; hostBroadcast(); }
 }
+// 방장 전용: 최대 인원 변경 (핸드 진행 중에는 불가)
+function resizeTable(s, n){
+  n = Math.max(MIN_SEATS, Math.min(MAX_SEATS, n|0));
+  if (BETTING.has(s.stage) || n===s.seats.length) return null;
+  if (s.seats.filter(Boolean).length > n) return null;
+  const c = clone(s);
+  const seats = Array(n).fill(null), rest = [];
+  c.seats.forEach((p,i)=>{ if (!p) return; if (i<n) seats[i] = p; else rest.push(p); });
+  rest.forEach(p=>{ seats[seats.findIndex(x=>!x)] = p; });
+  const moved = rest.length > 0;
+  c.seats = seats;
+  if (c.dealer >= n) c.dealer = -1;
+  if (moved){ c.winners = []; c.seats.forEach(p=>{ if (p) p.shown = false; }); }
+  logIt(c, -1, `방장이 최대 인원을 ${n}명으로 바꿨어요`);
+  return c;
+}
 function standState(s, i, now){
   if (i<0) return null;
   const p = s.seats[i];
   if (BETTING.has(s.stage) && p.inHand && !p.folded){
     if (s.toAct===i){ const n = act(s, i, {type:'fold'}, now); n.seats[i].leaving = true; return n; }
     const n = clone(s); n.seats[i].folded = true; n.seats[i].leaving = true; logIt(n, i, '폴드 · 자리를 떠남');
-    advance(n, (n.toAct+SEATS-1)%SEATS, now); return n;
+    advance(n, (n.toAct+n.seats.length-1)%n.seats.length, now); return n;
   }
   const n = clone(s);
   if (BETTING.has(s.stage) && p.inHand) n.seats[i].leaving = true; else n.seats[i] = null;
@@ -591,6 +618,8 @@ document.addEventListener('click', async e=>{
     case 'start-local': clearTimeout(render.auto); startLocal(); break;
     case 'next-local': clearTimeout(render.auto); nextLocalHand(); break;
     case 'host': hostRoom(); break;
+    case 'hseats-': case 'hseats+': hostSeats = Math.max(MIN_SEATS, Math.min(MAX_SEATS, hostSeats + (a==='hseats+'?1:-1))); store('holdem.seats', String(hostSeats)); render(); break;
+    case 'seats-': case 'seats+': { const st = net.hostState; if (st) sendNet({t:'resize', n: st.seats.length + (a==='seats+'?1:-1)}); break; }
     case 'invite': shareInvite(); break;
     case 'leave': leaveToLobby(); break;
     case 'sit': sendNet({t:'sit', seat:+el.dataset.i}); break;
