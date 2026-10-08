@@ -1464,6 +1464,36 @@ window.addEventListener('pageshow', ()=>{ if (!document.hidden) audioShow(); });
 // 소리를 켜 둔 채로 다시 들어오거나 아이폰이 오디오를 안 깨워줬으면, 첫 터치 때 다시 시작 (브라우저 정책상 터치가 필요)
 ['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev, ()=>{ if (snd.on && (!snd.ctx || snd.ctx.state !== 'running' || !snd.src)){ audioReady(); syncMusic(); } }, {capture: true, passive: true}));
 
+// 베팅 '치킹!' : 보내준 영상의 소리를 분석해서 같은 구조로 합성
+//  - 시작 '치': 밝은 금속성 잡음이 아주 짧게 (두 번 겹쳐 치는 느낌, 7ms 간격)
+//  - 이어서 '킹': 1378 · 3528 · 6260 · 9445Hz 배음 (6260Hz가 가장 큼), 높은 배음일수록 빨리 사라짐
+//  - 영상보다 짧게: 약 0.4초 안에 거의 사라짐
+const CHIKING = [[1378, .5, .15], [1381.6, .22, .15], [1711, .05, .06], [3528, .26, .12], [6260, .9, .09], [6268.5, .32, .09], [7585, .04, .05], [8099, .05, .05], [9445, .38, .055], [13147, .12, .03]];
+function chiking(ctx, out, t, v = 1){
+  if (!chiking.nb || chiking.nb.sampleRate !== ctx.sampleRate){ const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * .2), ctx.sampleRate), d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; chiking.nb = nb; }
+  const g0 = .16 * v;
+  // '치' (금속이 부딪히는 짧은 잡음, 두 번)
+  [[0, .55], [.007, 1]].forEach(([d, a]) => {
+    const n = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+    n.buffer = chiking.nb; hp.type = 'highpass'; hp.frequency.value = 3800; hp.Q.value = .8;
+    g.gain.setValueAtTime(0, t + d); g.gain.linearRampToValueAtTime(g0 * 1.3 * a, t + d + .001); g.gain.setTargetAtTime(0, t + d + .001, .016);
+    n.connect(hp); hp.connect(g); g.connect(out); n.start(t + d, Math.random() * .05, .12);
+  });
+  { // 울리는 동안 남는 '찰랑' 잔향 (높은 대역 잡음, 약하게)
+    const n = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    n.buffer = chiking.nb; bp.type = 'bandpass'; bp.frequency.value = 8000; bp.Q.value = .6;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(g0 * .25, t + .004); g.gain.setTargetAtTime(0, t + .004, .045);
+    n.connect(bp); bp.connect(g); g.connect(out); n.start(t, 0, .2);
+  }
+  // '킹' (금속 울림)
+  CHIKING.forEach(([f, a, tau]) => {
+    const o = ctx.createOscillator(), g = ctx.createGain(), st = t + .007;
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(0, st); g.gain.linearRampToValueAtTime(g0 * a, st + .0015); g.gain.setTargetAtTime(0, st + .0015, tau);
+    o.connect(g); g.connect(out); o.start(st); o.stop(st + tau * 7 + .01);
+  });
+}
+
 // ---------- 효과음 ----------
 const sfx = (()=>{
   let nb = null;
@@ -1474,7 +1504,7 @@ const sfx = (()=>{
   // 칩 하나가 부딪히는 소리 (점토 칩: 짧고 맑은 '딱')
   const clink = (t, v) => { const f = 2600 + Math.random() * 1600; tone(f, t, .11 * v, .012); tone(f * 1.47, t, .06 * v, .009); hiss(t, .03, 'highpass', 3500, .7, .12 * v, .006); tone(700 + Math.random() * 300, t, .05 * v, .015); };
   // 카지노 벨 '띠링~' (보내준 영상의 벨 소리 배음 구조를 본떠 합성: 약 1380Hz, 배음 비율 1 : 2.56 : 4.54 : 6.85)
-  const coin = (t, v = 1, up = 1) => { const f = 1378 * up; [[1, 1, .42], [2.56, .55, .24], [4.54, .85, .14], [6.85, .35, .08]].forEach(([r, a, d]) => tone(f * r, t, .13 * v * a, d)); hiss(t, .025, 'highpass', 7000, .7, .07 * v, .005); };
+  const coin = (t, v = 1) => chiking(snd.ctx, snd.sfx, t, v);
   const chips = (n, spread = .05, v = 1) => { const t0 = snd.ctx.currentTime + .01; for (let k = 0; k < n; k++) clink(t0 + k * spread * (.6 + Math.random() * .8), v * (.7 + Math.random() * .4)); };
   return {
     // 체크: 테이블을 손가락으로 '똑똑'
