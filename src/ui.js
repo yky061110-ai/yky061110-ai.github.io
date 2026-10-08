@@ -68,6 +68,44 @@ function renderLobby(){
   </div>`;
 }
 
+/* ---------- 초대 링크로 들어왔을 때: 이름 정하고 입장 ---------- */
+let pendingRoom = null;
+function renderJoin(){
+  app.innerHTML = `
+  <div class="bar"><h1>홀덤 테이블</h1><button class="ghost" data-a="rules">족보·규칙</button></div>
+  <section class="hero">
+    <div class="suits">♠ ♥ ♦ ♣</div>
+    <h2>초대받은 테이블</h2>
+    <p>테이블에서 쓸 이름을 정하고 입장하세요. 빈 자리에 바로 앉아요.</p>
+  </section>
+  <form class="mode" id="join-form" novalidate>
+    <label for="join-name"><b>내 이름</b> <span class="note">(최대 10자)</span></label>
+    <input id="join-name" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(ui.joinDraft ?? (store('holdem.name') || ''))}" placeholder="예: 영규" autocomplete="nickname" enterkeyhint="go">
+    <button class="primary" type="submit">입장하기</button>
+    <p class="note">이름은 이 기기에 저장돼서 다음에도 그대로 써요. 게임 중에도 바꿀 수 있어요.</p>
+  </form>
+  <button class="ghost" data-a="leave" style="align-self:flex-start">초대 대신 혼자 컴퓨터와 하기</button>`;
+  const inp = document.getElementById('join-name');
+  if (inp && !inp.value) inp.focus();
+}
+function submitJoin(){
+  const inp = document.getElementById('join-name');
+  const raw = (inp && inp.value || '').trim();
+  if (!raw){ toast('이름을 입력해 주세요.'); inp && inp.focus(); return; }
+  me.name = cleanName(raw); store('holdem.name', me.name);
+  const room = pendingRoom; pendingRoom = null;
+  joinRoom(room);
+}
+function saveRename(){
+  const inp = document.getElementById('rename-in');
+  const raw = (inp && inp.value || '').trim();
+  if (!raw){ toast('이름을 입력해 주세요.'); return; }
+  me.name = cleanName(raw); store('holdem.name', me.name);
+  ui.renameOpen = false; ui.renameFocus = false;
+  sendNet({t:'rename', name: me.name});
+  toast(`이름을 ‘${me.name}’(으)로 바꿨어요.`);
+}
+
 /* ---------- 테이블 ---------- */
 const SLOT = [[50,90],[13,69],[13,29],[50,9],[87,29],[87,69]];
 function currentState(){ return view==='local' ? localState : net.state; }
@@ -147,6 +185,8 @@ function renderTable(){
   const slider = document.getElementById('raise-range');
   if (slider) slider.addEventListener('input', e=>{ ui.raiseTo = +e.target.value; const b=document.getElementById('raise-go'); if (b) b.textContent = raiseLabel(s, myIdx, ui.raiseTo); const v=document.getElementById('raise-val'); if (v) v.textContent = fmt(ui.raiseTo); });
   tickTimers();
+  // 이름 입력 중 화면이 갱신돼도 입력이 끊기지 않게
+  if (ui.renameOpen && ui.renameFocus){ const r = document.getElementById('rename-in'); if (r){ r.focus(); const n = r.value.length; try { r.setSelectionRange(n, n); } catch(_){} } }
 }
 
 function raiseLabel(s, i, to){ const p=s.seats[i]; if (to >= p.bet+p.chips) return `올인 ${fmt(to)}`; return `${s.currentBet===0?'베팅':'레이즈'} ${fmt(to)}`; }
@@ -221,8 +261,14 @@ function renderDock(s, mi, now){
     const btns = [];
     if (p.sitOut) btns.push(`<button class="ghost" data-a="sitback">자리로 돌아오기</button>`);
     if (p.chips===0 && (!p.inHand || s.stage==='done' || s.stage==='idle')) btns.push(`<button class="ghost" data-a="rebuy">${fmt(START_CHIPS)}칩 다시 받기</button>`);
+    btns.push(`<button class="ghost" data-a="rename-open">이름 변경</button>`);
     if (net.role!=='host') btns.push(`<button class="ghost" data-a="stand">자리에서 일어나기</button>`);
     extra = `<div class="row">${btns.join('')}</div>`;
+    if (ui.renameOpen){
+      extra += `<form class="row" id="rename-form" novalidate>
+        <input id="rename-in" class="code-in" style="letter-spacing:0;text-transform:none;font-family:var(--f-body)" maxlength="10" value="${esc(ui.renameDraft ?? (p.name || me.name))}" aria-label="새 이름" enterkeyhint="done">
+        <button class="primary" type="submit">저장</button></form>`;
+    }
   }
   return `<div class="dock">${mine}${controls}${extra}${inviteBox()}</div>`;
 }
@@ -362,6 +408,7 @@ function onHostMsg(conn, d){
     return;
   }
   const c = net.conns.get(conn.peer); if (!c) return;
+  if (d.t==='rename') c.name = cleanName(d.name);
   hostApply(c.pid, c.name, d);
 }
 function hostApply(pid, name, d){
@@ -458,7 +505,7 @@ function genCode(){ const A='abcdefghjkmnpqrstuvwxyz23456789'; let c=''; for (le
 
 /* ================= 이벤트 ================= */
 function render(){
-  if (view==='lobby') renderLobby(); else renderTable();
+  if (view==='lobby') renderLobby(); else if (view==='join') renderJoin(); else renderTable();
   if (view==='local' && localState && localState.stage==='done' && !localGameOver(localState)){
     clearTimeout(render.auto); render.auto = setTimeout(nextLocalHand, 4500);
   }
@@ -485,8 +532,19 @@ document.addEventListener('click', async e=>{
     case 'raise-open': ui.raiseOpen = !ui.raiseOpen; render(); break;
     case 'preset': ui.raiseTo = +el.dataset.v; ui.raiseOpen = true; render(); break;
     case 'raise-go': doAction({type:'raise', to:ui.raiseTo}); break;
+    case 'rename-open': ui.renameOpen = !ui.renameOpen; ui.renameDraft = null; ui.renameFocus = ui.renameOpen; render(); break;
   }
 });
+document.addEventListener('submit', e=>{
+  if (e.target.id==='join-form'){ e.preventDefault(); submitJoin(); }
+  if (e.target.id==='rename-form'){ e.preventDefault(); saveRename(); }
+});
+document.addEventListener('input', e=>{
+  if (e.target.id==='join-name') ui.joinDraft = e.target.value;
+  if (e.target.id==='rename-in') ui.renameDraft = e.target.value;
+});
+document.addEventListener('focusin', e=>{ if (e.target.id==='rename-in') ui.renameFocus = true; });
+document.addEventListener('focusout', e=>{ if (e.target.id==='rename-in') setTimeout(()=>{ if (document.activeElement && document.activeElement.id!=='rename-in') ui.renameFocus = false; }, 0); });
 document.addEventListener('keydown', e=>{ if (e.key==='Escape') document.getElementById('sheet').innerHTML=''; });
 document.addEventListener('change', e=>{
   if (e.target.id==='name-in'){ me.name = cleanName(e.target.value); e.target.value = me.name; store('holdem.name', me.name); }
@@ -500,7 +558,7 @@ function doAction(a){
 }
 
 const startRoom = roomFromURL();
-if (startRoom && /^holdem-[a-z0-9]{8}$/.test(startRoom)) joinRoom(startRoom);
-else render();
+if (startRoom && /^holdem-[a-z0-9]{8}$/.test(startRoom)){ pendingRoom = startRoom; view = 'join'; }
+render();
 
 if ('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
