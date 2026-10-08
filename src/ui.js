@@ -147,6 +147,30 @@ const HAND_INFO = {
 const LADDER = ['로열 플러시','스트레이트 플러시','포카드','풀 하우스','플러시','스트레이트','트리플','투 페어','원 페어','하이카드'];
 const LADDER_SHORT = ['로플','스플','포카','풀하','플러','스트','트리','투페','원페','하이'];
 // 지금 내 족보가 10단계 중 어디인지 + 나올 확률
+// 내 카드 2장이 족보에 실제로 쓰였는지 (바닥 카드만으로 된 족보인지) 구분
+function handUse(hole, board){
+  if (!hole || hole.length<2 || board.length<3) return null;
+  const b = best(hole.concat(board)); if (!b) return null;
+  const five = b.cards, cnt = {};
+  five.forEach(c=>{ cnt[c[0]] = (cnt[c[0]]||0) + 1; });
+  let core;
+  if ([1,2,3,6,7].includes(b.cat)) core = five.filter(c=>cnt[c[0]]>=2);       // 페어·트리플·풀하우스·포카드: 짝 맞은 카드
+  else if (b.cat===0) core = [five.slice().sort((x,y)=>rv(y)-rv(x))[0]];       // 하이카드: 제일 높은 카드
+  else core = five;                                                           // 스트레이트·플러시: 5장 모두
+  let mineCore = hole.filter(c=>core.includes(c));
+  let kick = hole.filter(c=>five.includes(c) && !core.includes(c));
+  if (board.length===5){ const bb = best(board); if (bb && bb.score===b.score){ mineCore = []; kick = []; } } // 바닥 5장 그대로가 최고
+  return {b, name: handName(b), mineCore, kick, shared: mineCore.length===0};
+}
+function cardTxt(c){ const r = c[0]==='T' ? '10' : c[0]; const sy = {s:'♠',h:'♥',d:'♦',c:'♣'}[c[1]]; return `<span class="ct ${c[1]==='h'||c[1]==='d'?'red':''}">${r}${sy}</span>`; }
+function handUseHTML(u){
+  if (!u) return '';
+  if (u.shared){
+    const k = u.kick.length ? `내 카드로는 ${u.kick.map(cardTxt).join(' ')} 키커만 더해져요` : '내 카드는 안 쓰여요 (비기기 쉬워요)';
+    return `<span class="huse shared">바닥 카드만으로 된 ${esc(u.name)}예요 · ${k}</span>`;
+  }
+  return `<span class="huse"><b>내 카드</b> ${u.mineCore.map(cardTxt).join(' ')}로 만든 ${esc(u.name)}${u.kick.length ? ` · 키커 ${u.kick.map(cardTxt).join(' ')}` : ''}</span>`;
+}
 function handRankHTML(term){
   const it = HAND_INFO[term]; if (!it) return '';
   if (!it.rank) return `<span class="hrank"><span class="hr-txt">시작 패 · 나올 확률 <b>${it.p}</b></span></span>`;
@@ -698,7 +722,8 @@ function resultHTML(s, mi){
   const winHands = new Set(rows.filter(r=>r.w).map(r=>r.i));
   const body = rows.map(r=>{
     const res = r.w ? `<b class="res-win num">+${fmt(r.w)}</b>` : r.p.folded ? `<span class="res-fold">폴드</span>` : `<span class="res-lose">패배</span>`;
-    const hn = r.p.hn ? esc(r.p.hn) : '';
+    const u = !r.p.folded && s.board.length>=3 ? handUse(r.p.cards, s.board) : null;
+    const hn = r.p.hn ? esc(r.p.hn) + (u && u.shared ? ' <small class="res-board">바닥</small>' : '') : '';
     return `<tr class="${r.w?'w':''}${r.p.folded?' f':''}${r.i===mi?' me':''}"><td class="res-nm"><span data-nm="${r.i}"></span>${r.i===mi?' <small>(나)</small>':''}</td><td class="res-cards">${r.p.cards.map(c=>cardHTML(c,{mini:true, dim:r.p.folded})).join('')}</td><td class="res-hn">${hn}</td><td class="res-out">${res}</td></tr>`;
   }).join('');
   const note = s.uncontested ? '<p class="res-note">모두 폴드해서 끝난 판이에요. 공개된 카드는 참고용이에요.</p>' : '';
@@ -712,6 +737,7 @@ function renderDock(s, mi, now){
   const p = s.seats[mi];
   const inPlay = p.inHand && !p.folded;
   const b = inPlay && s.board.length>=3 ? best(p.cards.concat(s.board)) : null;
+  const use = b ? handUse(p.cards, s.board) : null;
   let handTxt = '';
   if (p.inHand && p.cards.length){
     if (b) handTxt = handName(b);
@@ -720,7 +746,7 @@ function renderDock(s, mi, now){
     if (p.folded) handTxt = '폴드함';
   }
   const holes = p.inHand && p.cards.length ? p.cards.map(c=>cardHTML(c,{animate:true,key:s.handNo+'m', dim:p.folded})).join('') : cardHTML(null)+cardHTML(null);
-  const mine = `<div class="mine"><div class="hole">${holes}</div><div class="info"><span class="hand">${esc(handTxt || (s.stage==='idle'?'대기 중':'이번 핸드 관전'))}${HAND_INFO[handTxt] ? `<button class="info-btn${ui.infoOpen?' on':''}" data-a="info" aria-label="${handTxt} 뜻 보기" aria-expanded="${!!ui.infoOpen}">i</button>` : ''}</span>${p.inHand && !p.folded ? handRankHTML(handTxt) : ''}<span class="sub">칩 <b class="num">${fmt(p.chips)}</b>${p.bet?` · 이번 라운드 베팅 <span class="num">${fmt(p.bet)}</span>`:''}</span></div></div>`;
+  const mine = `<div class="mine"><div class="hole">${holes}</div><div class="info"><span class="hand">${use && use.shared ? '<em class="hand-board">바닥</em>' : ''}${esc(handTxt || (s.stage==='idle'?'대기 중':'이번 핸드 관전'))}${HAND_INFO[handTxt] ? `<button class="info-btn${ui.infoOpen?' on':''}" data-a="info" aria-label="${handTxt} 뜻 보기" aria-expanded="${!!ui.infoOpen}">i</button>` : ''}</span>${handUseHTML(use)}${p.inHand && !p.folded ? handRankHTML(handTxt) : ''}<span class="sub">칩 <b class="num">${fmt(p.chips)}</b>${p.bet?` · 이번 라운드 베팅 <span class="num">${fmt(p.bet)}</span>`:''}</span></div></div>`;
 
   let controls = '';
   if (BETTING.has(s.stage) && s.toAct===mi){
