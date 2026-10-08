@@ -413,10 +413,10 @@ body.wide-table .res-cards{--cw:30px;width:68px}
 </style>
 <style>
 :root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-/* 패드: 홈 화면 앱으로 열면 위 상태 표시줄(시계·배터리)이 화면 위에 겹치므로 그만큼 확실히 내려줌 */
+/* 패드: 아이패드는 맨 위(상태 표시줄 아래쪽까지)를 흐리게 처리하므로, 제목 줄을 그 흐린 구역 밖으로 충분히 내림 */
 @media (min-width:700px){ body{padding-top:20px} }
-@media (display-mode:standalone) and (min-width:700px){ :root{padding-top:max(env(safe-area-inset-top,0px),24px)} }
-@media (min-width:700px){ :root.ios-app{padding-top:max(env(safe-area-inset-top,0px),24px)} }
+@media (display-mode:standalone) and (min-width:700px){ :root{padding-top:calc(env(safe-area-inset-top,0px) + 40px)} }
+@media (min-width:700px){ :root.ios-app, :root.ipad{padding-top:calc(env(safe-area-inset-top,0px) + 40px)} }
 body{margin:0;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none!important}
 
@@ -1092,7 +1092,7 @@ function botDecide(s, i){
 }
 
 /* ================= 화면 ================= */
-try { if (navigator.standalone) document.documentElement.classList.add('ios-app'); } catch(_){}
+try { if (navigator.standalone) document.documentElement.classList.add('ios-app'); if (/iPad/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) document.documentElement.classList.add('ipad'); } catch(_){}
 const app = document.getElementById('app');
 const fmt = n => '$' + Number(n||0).toLocaleString('en-US');   // 칩 금액은 달러로 표시
 const esc = t => String(t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -2492,7 +2492,7 @@ function audioReady(){
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch(_){} // 아이폰 무음 스위치여도 들리게
     snd.ctx = new AC();
-    snd.master = snd.ctx.createGain(); snd.master.gain.value = 1; snd.master.connect(snd.ctx.destination);
+    snd.master = snd.ctx.createGain(); snd.master.gain.value = 1; snd.masterV = 1; snd.master.connect(snd.ctx.destination);
     snd.music = snd.ctx.createGain(); snd.music.gain.value = 0; snd.music.connect(snd.master);
     snd.sfx = snd.ctx.createGain(); snd.sfx.gain.value = .8; snd.sfx.connect(snd.master);
     // 다른 앱 다녀온 뒤 아이폰이 오디오를 다시 살려주면 음악 이어서
@@ -2503,14 +2503,18 @@ function audioReady(){
 }
 function toggleSound(){
   snd.on = !snd.on; store('holdem.sound', snd.on ? '1' : '0');
-  if (snd.on){ audioReady(); syncMusic(); sfx.tick(); }
+  if (snd.on){ audioReady(); if (IS_IOS) melUnlock(); syncMusic(); sfx.tick(); }
   else stopMusic();
   render();
 }
 const inGame = () => view === 'local' || view === 'online';
+function masterTo(v, dur){
+  if (!snd.ctx) return; const g = snd.master.gain, t = snd.ctx.currentTime;
+  g.cancelScheduledValues(t); g.setValueAtTime(snd.masterV == null ? 1 : snd.masterV, t); g.linearRampToValueAtTime(v, t + dur); snd.masterV = v;
+}
 function syncMusic(){
   if (snd.on && inGame() && !document.hidden){
-    if (snd.ctx){ const g = snd.master.gain, t = snd.ctx.currentTime; if (g.value < .99){ g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(1, t + .25); } }
+    if (snd.ctx && snd.masterV !== 1) masterTo(1, .25);
     startMusic();
   } else { stopMusic(); if (!inGame()) snd.pos = 0; } // 새 게임에 들어오면 인트로부터
 }
@@ -2520,7 +2524,31 @@ function musicPos(){
   const e = snd.ctx.currentTime - snd.t0, end = snd.loopEnd || LOOP_END;
   return e < end ? e : LOOP_START + (e - LOOP_START) % (end - LOOP_START);
 }
+// 아이폰·아이패드: 배경음악은 <audio>로 재생 (iOS에서 가장 안정적). 인트로 → 본곡 반복
+const IS_IOS = /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const mel = {intro: null, loop: null, stage: null, playing: false};
+function melInit(){
+  if (mel.intro) return;
+  mel.intro = new Audio('audio/lounge-intro.mp3'); mel.loop = new Audio('audio/lounge-loop.mp3'); mel.loop.loop = true;
+  [mel.intro, mel.loop].forEach(a => { a.preload = 'auto'; a.setAttribute('playsinline', ''); a.setAttribute('webkit-playsinline', ''); });
+  mel.intro.addEventListener('ended', () => { if (mel.playing){ mel.stage = 'loop'; mel.loop.currentTime = 0; mel.loop.play().catch(()=>{ mel.playing = false; }); } });
+}
+// 터치하는 순간 두 오디오를 모두 '허락받은' 상태로 만들어 둠 (나중에 터치 없이도 이어서 재생되게)
+function melUnlock(){
+  melInit(); if (mel.unlocked) return; mel.unlocked = true;
+  [mel.intro, mel.loop].forEach(a => { if (!a.paused) return; a.muted = true; const pr = a.play(); if (pr && pr.then) pr.then(() => { if (!(mel.playing && ((mel.stage === 'loop') === (a === mel.loop)))) a.pause(); a.muted = false; }).catch(() => { a.muted = false; mel.unlocked = false; }); else a.muted = false; });
+}
+function melStart(){
+  melInit(); if (mel.playing) return; mel.playing = true;
+  const a = mel.stage === 'loop' ? mel.loop : mel.intro; if (!mel.stage) { mel.stage = 'intro'; mel.intro.currentTime = 0; }
+  a.muted = false; const pr = a.play(); if (pr && pr.catch) pr.catch(() => { mel.playing = false; });
+}
+function melStop(reset){
+  if (!mel.intro) return; mel.playing = false; mel.intro.pause(); mel.loop.pause();
+  if (reset){ mel.stage = null; try { mel.intro.currentTime = 0; mel.loop.currentTime = 0; } catch(_){} }
+}
 function stopMusic(fast){
+  if (IS_IOS){ melStop(!inGame()); return; }
   if (!snd.ctx || !snd.src) return;
   snd.pos = musicPos();
   const t = snd.ctx.currentTime, src = snd.src; snd.src = null;
@@ -2534,6 +2562,7 @@ function loadMusic(ctx){
   return snd.rendering;
 }
 async function startMusic(){
+  if (IS_IOS){ audioReady(); melStart(); return; }
   const ctx = audioReady(); if (!ctx || snd.src) return;
   if (!snd.buf){ await loadMusic(ctx); }
   if (!snd.buf || !snd.on || !inGame() || snd.src || document.hidden || ctx !== snd.ctx) return;
@@ -2546,9 +2575,9 @@ async function startMusic(){
 }
 // 다른 앱으로 갈 때: 소리를 먼저 아주 짧게 줄이고 음악을 멈춘 뒤 오디오를 재움 (끊기며 '지잉' 하는 소리 방지)
 function audioHide(){
+  if (IS_IOS) melStop(!inGame());
   if (!snd.ctx) return;
-  const t = snd.ctx.currentTime, g = snd.master.gain;
-  g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(0, t + .05);
+  masterTo(0, .05);
   stopMusic(true);
   clearTimeout(snd.hideT); snd.hideT = setTimeout(()=>{ if (document.hidden && snd.ctx) snd.ctx.suspend().catch(()=>{}); }, 90);
 }
@@ -2558,7 +2587,11 @@ document.addEventListener('visibilitychange', ()=>{ if (document.hidden) audioHi
 window.addEventListener('pagehide', audioHide);
 window.addEventListener('pageshow', ()=>{ if (!document.hidden) audioShow(); });
 // 소리를 켜 둔 채로 다시 들어오거나 아이폰이 오디오를 안 깨워줬으면, 첫 터치 때 다시 시작 (브라우저 정책상 터치가 필요)
-['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev, ()=>{ if (snd.on && (!snd.ctx || snd.ctx.state !== 'running' || !snd.src)){ audioReady(); syncMusic(); } }, {capture: true, passive: true}));
+['pointerdown','touchend','click','keydown'].forEach(ev=>document.addEventListener(ev, ()=>{
+  if (!snd.on) return;
+  if (IS_IOS){ melUnlock(); if (!snd.ctx || snd.ctx.state !== 'running') audioReady(); if (inGame() && !mel.playing) syncMusic(); return; }
+  if (!snd.ctx || snd.ctx.state !== 'running' || !snd.src){ audioReady(); syncMusic(); }
+}, {capture: true, passive: true}));
 
 // 베팅 '치킹!' : 보내준 영상의 소리를 분석해서 같은 구조로 합성
 //  - 시작 '치': 밝은 금속성 잡음이 아주 짧게 (두 번 겹쳐 치는 느낌, 7ms 간격)
