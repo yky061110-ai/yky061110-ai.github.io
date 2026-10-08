@@ -438,9 +438,9 @@ function renderTable(){
   if (ui.renameOpen && ui.renameFocus){ const r = document.getElementById('rename-in'); if (r){ r.focus(); const n = r.value.length; try { r.setSelectionRange(n, n); } catch(_){} } }
 }
 
-// 내 자리 왼쪽: 이모티콘 5개 + 더보기(+) / 오른쪽: 내 칩 종류별 더미
+// 내 자리 왼쪽: 이모티콘 3개 + 더보기(+) / 오른쪽: 내 칩 종류별 더미
 function mySideHTML(s, p){
-  const quick = EMOJIS.slice(0, 5).map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('');
+  const quick = EMOJIS.slice(0, 3).map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('');
   const all = ui.emoOpen ? `<div class="emo-all" role="listbox" aria-label="이모티콘 전체">${EMOJIS.map(e=>`<button data-a="emo-send" data-v="${e}" aria-label="${e} 보내기">${e}</button>`).join('')}</div>` : '';
   return `<div class="emostrip">${quick}<button class="more${ui.emoOpen?' on':''}" data-a="emo-toggle" aria-label="이모티콘 전체 보기" aria-expanded="${!!ui.emoOpen}">${ui.emoOpen?'×':'+'}</button></div>${all}
     <div class="mytray" aria-label="내 칩">${chipTray(p.chips, s.startChips||START_CHIPS, p.id)}</div>`;
